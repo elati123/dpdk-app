@@ -1,0 +1,11 @@
+Build started at 2024-10-18T15:30:26.002295
+Main binary: /usr/bin/python3
+Build Options: 
+Python system: Linux
+The Meson build system
+Version: 1.3.2
+Source dir: /home/melih/Desktop/tez/my_rte_app
+Build dir: /home/melih/Desktop/tez/my_rte_app/build
+Build type: native build
+
+ERROR: Invalid source tree: first statement must be a call to project()
