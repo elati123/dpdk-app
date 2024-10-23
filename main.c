@@ -53,10 +53,30 @@ static void send_packets(struct rte_mempool *mbuf_pool, uint16_t portid) {
     printf("Sent %u packets\n", nb_tx);
 }
 
+static void print_port_stats(uint16_t port_id) {
+    struct rte_eth_stats stats;
+    rte_eth_stats_get(port_id, &stats);
+
+    printf("Port %u stats:\n", port_id);
+    printf("  RX packets: %lu\n", stats.ipackets);
+    printf("  TX packets: %lu\n", stats.opackets);
+    printf("  RX errors:  %lu\n", stats.ierrors);
+    printf("  TX errors:  %lu\n", stats.oerrors);
+    printf("  RX dropped: %lu\n", stats.imissed);
+    printf("  RX no mbuf: %lu\n", stats.rx_nombuf);
+}
+
+
 int main(int argc, char *argv[]) {
     struct rte_mempool *mbuf_pool;
     uint16_t portid;
-
+    uint16_t nb_ports;
+/*
+    // Get the number of available ports
+    nb_ports = rte_eth_dev_count_avail();
+    if (nb_ports == 0)
+    rte_exit(EXIT_FAILURE, "No available ports\n");
+*/
     // Initialize DPDK EAL
     int ret = rte_eal_init(argc, argv);
     if (ret < 0) rte_panic("Cannot init EAL\n");
@@ -73,7 +93,7 @@ int main(int argc, char *argv[]) {
         rte_exit(EXIT_FAILURE, "Invalid port\n");
     }
 
-    struct rte_eth_conf port_conf = {0};
+    struct rte_eth_conf port_conf = {0};   
     if (rte_eth_dev_configure(portid, 1, 1, &port_conf) != 0) {
         rte_exit(EXIT_FAILURE, "Cannot configure device\n");
     }
@@ -94,9 +114,14 @@ int main(int argc, char *argv[]) {
     // Generate and send packets
     send_packets(mbuf_pool, portid);
 
+    //port stats
+    print_port_stats(portid);
+
     // Stop and close the port
     rte_eth_dev_stop(portid);
     rte_eth_dev_close(portid);
 
     return 0;
 }
+
+
