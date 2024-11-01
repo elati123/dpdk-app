@@ -1,0 +1,8 @@
+sudo dpdk-testpmd -c7 --vdev=net_tap0,iface=eth0 --vdev=net_tap1,iface=eth1 -- -i --nb-cores=2 --nb-ports=2 --total-num-mbufs=2048
+
+  mkdir -p /dev/hugepages
+  mountpoint -q /dev/hugepages || mount -t hugetlbfs nodev /dev/hugepages
+  echo 64 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
+
+
+sudo ./build/my_rte_app --vdev=net_tap0,iface=tap0,persist
