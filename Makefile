@@ -2,10 +2,10 @@
 # Copyright(c) 2010-2014 Intel Corporation
 
 # binary name
-APP = my_rte_app
+APP = helloworld
 
 # all source are stored in SRCS-y
-SRCS-y := main.c
+SRCS-y := main2.c
 
 PKGCONF ?= pkg-config
 

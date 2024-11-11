@@ -13,53 +13,13 @@
 #define MBUF_CACHE_SIZE 250
 #define BURST_SIZE 32
 #define PACKET_LEN 64
-#define DEST_IP_ADDR  RTE_IPV4(10, 0, 10, 2)
+#define DEST_IP_ADDR  RTE_IPV4(10, 0, 2, 8)
 #define SEND_INTERVAL 10000000 // Sending interval in microseconds
 
 
 // Destination and source MAC addresses
 static const struct rte_ether_addr dst_mac = { .addr_bytes = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff} };
-/*
-static void send_packets(struct rte_mempool *mbuf_pool, uint16_t portid) {
-    struct rte_mbuf *mbufs[BURST_SIZE];
-    int pkt_len = PACKET_LEN;
-    
-    for (int i = 0; i < BURST_SIZE; i++) {
-        // Allocate a packet buffer
-        mbufs[i] = rte_pktmbuf_alloc(mbuf_pool);
-        if (mbufs[i] == NULL) {
-            rte_exit(EXIT_FAILURE, "Failed to allocate mbuf\n");
-        }
 
-        // Set up Ethernet header
-        struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbufs[i], struct rte_ether_hdr *);
-        rte_ether_addr_copy(&src_mac, &eth_hdr->src_addr);
-        rte_ether_addr_copy(&dst_mac, &eth_hdr->dst_addr);
-        eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-
-        // Add custom payload (dummy data)
-        char *payload = rte_pktmbuf_append(mbufs[i], pkt_len - sizeof(struct rte_ether_hdr));
-        if (payload == NULL) {
-            rte_exit(EXIT_FAILURE, "Failed to add payload to mbuf\n");
-        }
-        snprintf(payload, pkt_len - sizeof(struct rte_ether_hdr), "DPDK Packet Generator");
-
-        // Set the total length of the packet
-        mbufs[i]->data_len = pkt_len;
-        mbufs[i]->pkt_len = pkt_len;
-    }
-
-    // Transmit the burst of packets
-    const uint16_t nb_tx = rte_eth_tx_burst(portid, 0, mbufs, BURST_SIZE);
-    if (nb_tx < BURST_SIZE) {
-        for (uint16_t i = nb_tx; i < BURST_SIZE; i++) {
-            rte_pktmbuf_free(mbufs[i]);
-        }
-    }
-
-    printf("Sent %u packets\n", nb_tx);
-}
-*/
 static void print_port_stats(uint16_t port_id) {
     struct rte_eth_stats stats;
     rte_eth_stats_get(port_id, &stats);
@@ -99,7 +59,6 @@ static void send_ip_packet(struct rte_mempool *mbuf_pool, uint16_t port) {
                   payload_size;
 
         mbufs[i]->data_len = pkt_len;
-        mbufs[i]->pkt_len = 14;
 
         eth_hdr = rte_pktmbuf_mtod(mbufs[i], struct rte_ether_hdr *);
 
@@ -123,7 +82,7 @@ static void send_ip_packet(struct rte_mempool *mbuf_pool, uint16_t port) {
         ip_hdr->fragment_offset = 0;
         ip_hdr->time_to_live = 64;
         ip_hdr->next_proto_id = IPPROTO_ICMP;
-        ip_hdr->src_addr = rte_cpu_to_be_32(RTE_IPV4(10, 0, 10, 1)); // Source IP
+        ip_hdr->src_addr = rte_cpu_to_be_32(RTE_IPV4(10, 0, 2, 44)); // Source IP
         ip_hdr->dst_addr = rte_cpu_to_be_32(DEST_IP_ADDR);              // Destination IP
         ip_hdr->hdr_checksum = 0;
 
@@ -137,11 +96,8 @@ static void send_ip_packet(struct rte_mempool *mbuf_pool, uint16_t port) {
 
 
         /* Add payload. */
-        data = (char *)(icmp_hdr + 1);
-        snprintf(data, payload_size, "Hello, world!");
-
         /* Calculate ICMP checksum */
-        icmp_hdr->icmp_cksum = rte_raw_cksum(icmp_hdr, sizeof(struct rte_icmp_hdr) + payload_size);
+        icmp_hdr->icmp_cksum = rte_raw_cksum(icmp_hdr, sizeof(icmp_hdr));
         ip_hdr->hdr_checksum = rte_ipv4_cksum(ip_hdr);
 
     }
@@ -162,20 +118,9 @@ void continuous_send_receive_loop(struct rte_mempool *mbuf_pool, uint16_t port) 
 
     while (1) {
         // Send packets
-        for (int i = 0; i < BURST_SIZE; i++) {
-            mbufs[i] = rte_pktmbuf_alloc(mbuf_pool);
-            if (!mbufs[i]) continue;  // Skip if allocation failed
-
-            // Prepare the packet here (reuse your `send_ip_packet` logic)
+        // Prepare the packet here (reuse your `send_ip_packet` logic)
             send_ip_packet(mbuf_pool, port);
-
-            if (rte_eth_tx_burst(port, 0, &mbufs[i], 1) == 0) {
-                printf("Error sending packet\n");
-                rte_pktmbuf_free(mbufs[i]);
-            } else {
-                printf("Packet sent\n");
-            }
-        }
+        
 
         // Receive packets to keep the interface active
         uint16_t nb_rx = rte_eth_rx_burst(port, 0, mbufs, BURST_SIZE);
@@ -194,6 +139,7 @@ void continuous_send_receive_loop(struct rte_mempool *mbuf_pool, uint16_t port) 
 
 
 int main(int argc, char *argv[]) {
+    printf("I am working");
     struct rte_mempool *mbuf_pool;
     uint16_t portid;
     uint16_t nb_ports;
