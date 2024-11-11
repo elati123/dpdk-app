@@ -1,3 +1,2 @@
 Makefile
-build/creator
-build/creator-shared
+build
