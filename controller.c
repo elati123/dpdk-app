@@ -112,38 +112,38 @@ int main(int argc, char *argv[]) {
             struct rte_mbuf *mbuf = bufs[i];
             struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
             struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-           
-            printf("number of the packets received is %d",nb_rx);
-            // Display source and destination MAC addresses
-            printf("Packet %d:\n", i + 1);
-            printf("  Src MAC: %02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8"\n",
-                eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
-                eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
-                eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
-            printf("  Dst MAC: %02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8"\n",
-                eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
-                eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
-                eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
-                printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
-                // If the packet is IPv4, display source and destination IP addresses
             if (eth_hdr->ether_type == rte_cpu_to_be_16(CUSTOM_HEADER_TYPE)) {
-                struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-                printf("  Src IP: %d.%d.%d.%d\n",
-                    (ipv4_hdr->src_addr & 0xff),
-                    (ipv4_hdr->src_addr >> 8) & 0xff,
-                    (ipv4_hdr->src_addr >> 16) & 0xff,
-                    (ipv4_hdr->src_addr >> 24) & 0xff);
-                printf(
-                    "  Dst IP: %d.%d.%d.%d\n",
-                    (ipv4_hdr->dst_addr & 0xff),
-                    (ipv4_hdr->dst_addr >> 8) & 0xff,
-                    (ipv4_hdr->dst_addr >> 16) & 0xff,
-                    (ipv4_hdr->dst_addr >> 24) & 0xff);
-                }
+                printf("number of the packets received is %d",nb_rx);
+                // Display source and destination MAC addresses
+                printf("Packet %d:\n", i + 1);
+                printf("  Src MAC: %02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8"\n",
+                    eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
+                    eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
+                    eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
+                printf("  Dst MAC: %02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8":%02"PRIx8"\n",
+                    eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
+                    eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
+                    eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
+                    printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
+                    // If the packet is IPv4, display source and destination IP addresses
 
-            // Free the mbuf after processing
-            rte_pktmbuf_free(mbuf);
-        
+                    struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+                    printf("  Src IP: %d.%d.%d.%d\n",
+                        (ipv4_hdr->src_addr & 0xff),
+                        (ipv4_hdr->src_addr >> 8) & 0xff,
+                        (ipv4_hdr->src_addr >> 16) & 0xff,
+                        (ipv4_hdr->src_addr >> 24) & 0xff);
+                    printf(
+                        "  Dst IP: %d.%d.%d.%d\n",
+                        (ipv4_hdr->dst_addr & 0xff),
+                        (ipv4_hdr->dst_addr >> 8) & 0xff,
+                        (ipv4_hdr->dst_addr >> 16) & 0xff,
+                        (ipv4_hdr->dst_addr >> 24) & 0xff);
+                    
+
+                    // Free the mbuf after processing
+                    rte_pktmbuf_free(mbuf);
+            }
         }
     }
 
