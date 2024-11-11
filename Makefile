@@ -5,7 +5,7 @@
 APP = helloworld
 
 # all source are stored in SRCS-y
-SRCS-y := main2.c
+SRCS-y := creator.c
 
 PKGCONF ?= pkg-config
 
