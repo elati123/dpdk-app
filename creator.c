@@ -15,8 +15,8 @@
 #define CUSTOM_HEADER_TYPE 0x0833
 
 struct custom_hdr {
-    char str[5];
-    uint16_t num2;
+    char str[10];
+    uint32_t num2;
 };
 
 
@@ -81,10 +81,6 @@ void add_custom_header(struct rte_mbuf *pkt) {
         printf("Failed to prepend space for temporary Ethernet header.\n");
         return;
     }
-     printf("Inspecting the temporary header is valid???????: %02X:%02X:%02X:%02X:%02X:%02X\n",
-               tmp_eth_hdr->src_addr.addr_bytes[0], tmp_eth_hdr->src_addr.addr_bytes[1],
-               tmp_eth_hdr->src_addr.addr_bytes[2], tmp_eth_hdr->src_addr.addr_bytes[3],
-               tmp_eth_hdr->src_addr.addr_bytes[4], tmp_eth_hdr->src_addr.addr_bytes[5]);
 
     // need to save this in fresh structs the reason is explained after prepending the custom header
     struct rte_ether_addr tmp_src = tmp_eth_hdr->src_addr;
@@ -212,19 +208,45 @@ int main(int argc, char *argv[]) {
 
                 add_custom_header(mbuf);
 
-                //change the mac address and the ip address to make basically a repeater
-                struct rte_ether_hdr *new_eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *); // header is changed
-                struct rte_ether_addr tmp_mac = new_eth_hdr->dst_addr;
-                new_eth_hdr->dst_addr = new_eth_hdr->src_addr;
-                new_eth_hdr->src_addr = tmp_mac;
+                //change the mac address and the ip address to make basically a repeater. This section of the code is specific to my test setup
 
-                // change the ip
-                struct custom_hdr *cst_hdr = (struct custom_hdr *)(eth_hdr + 1);
+                struct rte_ether_hdr *new_eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *); // header is changed by above function
+
+                //struct rte_ether_addr tmp_mac = new_eth_hdr->dst_addr;
+
+                 // dont change the dst in case of broadcast messages comment out below to swap
+                //new_eth_hdr->dst_addr = new_eth_hdr->src_addr;
+
+               
+                // Populate source with the MAC address of the port
+                struct rte_ether_addr * p = &new_eth_hdr->src_addr;
+                rte_eth_macaddr_get(port_id, p);
+
+                //or just send a broadcast back (for trsting purposes)
+
+                
+
+                // change the ip (swap src dst)
+                struct custom_hdr *cst_hdr = (struct custom_hdr *)(new_eth_hdr + 1);
                 struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(cst_hdr + 1);
                 rte_be32_t tmp_ip = ipv4_hdr->dst_addr;
+                 printf("  Tmp IP: %d.%d.%d.%d\n",
+                        (tmp_ip & 0xff),
+                        (tmp_ip >> 8) & 0xff,
+                        (tmp_ip >> 16) & 0xff,
+                        (tmp_ip >> 24) & 0xff);
+
+
+
                 ipv4_hdr->dst_addr = ipv4_hdr->src_addr;
                 ipv4_hdr->src_addr = tmp_ip;
 
+                //DEBUG PRINTING DELETE LATER
+                printf("Custom Header:\n");
+                printf("  the size of custom header is %ld \n", sizeof(cst_hdr));
+                printf("  the size of ip header is %ld \n", sizeof(ipv4_hdr));
+                printf("  String: %s\n", cst_hdr->str); // Print up to 5 characters
+                printf("  Number: 0x%04x\n", rte_be_to_cpu_16(cst_hdr->num2)); // Convert to host byte order
 
 
                 if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0) {
