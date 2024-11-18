@@ -216,7 +216,10 @@ int main(int argc, char *argv[]) {
 
                  // dont change the dst in case of broadcast messages comment out below to swap
                 //new_eth_hdr->dst_addr = new_eth_hdr->src_addr;
-
+                
+                //Destination mac adddress for now is hard coded
+                static const struct rte_ether_addr dst_mac = { .addr_bytes = {0x08, 0x00, 0x27, 0x21, 0xad, 0x52} };
+                rte_ether_addr_copy(&dst_mac, &new_eth_hdr->dst_addr);
                
                 // Populate source with the MAC address of the port
                 struct rte_ether_addr * p = &new_eth_hdr->src_addr;
@@ -248,7 +251,7 @@ int main(int argc, char *argv[]) {
                 printf("  String: %s\n", cst_hdr->str); // Print up to 5 characters
                 printf("  Number: 0x%04x\n", rte_be_to_cpu_16(cst_hdr->num2)); // Convert to host byte order
 
-
+                // send the packets back with added cutom header
                 if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0) {
                 printf("Error sending packet\n");
                 rte_pktmbuf_free(mbuf);
