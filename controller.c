@@ -52,6 +52,21 @@ void display_mac_address(uint16_t port_id)
            mac_addr.addr_bytes[5]);
 }
 
+void print_ipv6_address(const struct in6_addr *ipv6_addr, const char *label)
+{
+    char addr_str[INET6_ADDRSTRLEN]; // Buffer for human-readable address
+
+    // Convert the IPv6 binary address to a string
+    if (inet_ntop(AF_INET6, ipv6_addr, addr_str, sizeof(addr_str)) != NULL)
+    {
+        printf("%s: %s\n", label, addr_str);
+    }
+    else
+    {
+        perror("inet_ntop");
+    }
+}
+
 // Initialize a port
 static int port_init(uint16_t port, struct rte_mempool *mbuf_pool)
 {
@@ -97,63 +112,15 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool)
 void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
 {
     printf("\nip6 packet is encountered\n");
-    // struct rte_ipv6_hdr *ipv6_hdr;
     struct ipv6_srh *srh;
-    struct hmac_tlv *hmac;
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
     srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
-    hmac = (struct hmac_tlv *)(srh + 1);
-
-    // Display source and destination MAC addresses
-    printf("Packet %d:\n", i + 1);
-    printf("  Src MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-           eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
-           eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
-           eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
-    printf("  Dst MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-           eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
-           eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
-           eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
-    printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
-
-    print_ipv6_address((struct in6_addr *)&ipv6_hdr->src_addr, "source");
-    print_ipv6_address((struct in6_addr *)&ipv6_hdr->dst_addr, "destination");
-
-    // Get srh pointer after ipv6 header
-    if (ipv6_hdr->proto == IPPROTO_ROUTING)
-    {
-        printf("The size of srh is %lu\n", sizeof(*srh));
-        printf("The size of hmac is %lu\n", sizeof(*hmac));
-        printf("The size of hmac is %lu\n", sizeof(eth_hdr));
-        // print_ipv6_address(srh->segments, "the only segment in the demo packet");
-        printf("the routing type of srh is %d\n", srh->segments_left);
-        print_ipv6_address(srh->segments + 1, "asd");
-        printf("HMAC type: %u\n", hmac->type);
-        printf("HMAC length: %u\n", hmac->length);
-        printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
-
-        // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
-        for (int i = 1; i < hmac->length / sizeof(uint64_t); i++)
-        {
-            printf("HMAC value[%d]: %016lx\n", i, hmac->hmac_value);
-        }
-
-        fflush(stdout);
-    }
-}
-
-void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
-{
-    printf("\nip6 packet is encountered\n");
-    // struct rte_ipv6_hdr *ipv6_hdr;
-
-    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
-    if (ipv6_hdr->proto == rte_cpu_to_be_16(143))
+    if (ipv6_hdr->proto == 43 && srh->next_header == 61 )
     {
         printf("segment routing detected");
-        struct ipv6_srh *srh;
+        
         struct hmac_tlv *hmac;
-        srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+        
         hmac = (struct hmac_tlv *)(srh + 1);
 
         // Display source and destination MAC addresses
@@ -195,7 +162,8 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
     }
 }
 
-process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *eth_hdr, int i)
+
+void process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *eth_hdr, int i)
 {
     printf("number of the packets received is %d", nb_rx);
 
@@ -214,7 +182,6 @@ process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *eth_hdr
     printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
     // If the packet is IPv4, display source and destination IP addresses
 
-    struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
     printf("  Src IP: %d.%d.%d.%d\n",
            (ipv4_hdr->src_addr & 0xff),
            (ipv4_hdr->src_addr >> 8) & 0xff,
@@ -279,6 +246,7 @@ int main(int argc, char *argv[])
 
             for (int i = 0; i < nb_rx; i++)
             {
+                printf("captured something\n");
                 struct rte_mbuf *mbuf = bufs[i];
                 struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 

@@ -259,8 +259,8 @@ void add_custom_header6(struct rte_mbuf *pkt)
     // Populate HMAC value (16 bytes of 0x01)
     hmac_hdr->hmac_value = 0x0101010101010101;
 
-    // 143 for segment routing
-    srh_hdr->next_header = 59;       // No Next Header in this example
+    // 61		Any host internal protocol
+    srh_hdr->next_header = 61;       // No Next Header in this example
     srh_hdr->hdr_ext_len = 2;        // Length of SRH in 8-byte units, excluding the first 8 bytes
     srh_hdr->routing_type = 4;       // Routing type for SRH
     srh_hdr->segments_left = 1;      // 1 segment left to visit (can be adjusted)
@@ -281,6 +281,7 @@ void add_custom_header6(struct rte_mbuf *pkt)
     // Set added headers to saved headers
     memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
     memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
+
 
     printf("Custom header added to ip6 packet in the ingress node");
 }
