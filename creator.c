@@ -173,51 +173,116 @@ void add_custom_header(struct rte_mbuf *pkt)
     printf("Custom header added to packet.\n");
 }
 
+void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
+{
+    printf("\nip6 packet is encountered\n");
+    // struct rte_ipv6_hdr *ipv6_hdr;
+    struct ipv6_srh *srh;
+    struct hmac_tlv *hmac;
+    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+    hmac = (struct hmac_tlv *)(srh + 1);
+
+    // Display source and destination MAC addresses
+    printf("Packet %d:\n", i + 1);
+    printf("  Src MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
+           eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
+           eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
+           eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
+    printf("  Dst MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
+           eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
+           eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
+           eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
+    printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
+
+    print_ipv6_address((struct in6_addr *)&ipv6_hdr->src_addr, "source");
+    print_ipv6_address((struct in6_addr *)&ipv6_hdr->dst_addr, "destination");
+
+    // Get srh pointer after ipv6 header
+    if (ipv6_hdr->proto == IPPROTO_ROUTING)
+    {
+        printf("The size of srh is %lu\n", sizeof(*srh));
+        printf("The size of hmac is %lu\n", sizeof(*hmac));
+        printf("The size of hmac is %lu\n", sizeof(eth_hdr));
+        // print_ipv6_address(srh->segments, "the only segment in the demo packet");
+        printf("the routing type of srh is %d\n", srh->segments_left);
+        print_ipv6_address(srh->segments + 1, "asd");
+        printf("HMAC type: %u\n", hmac->type);
+        printf("HMAC length: %u\n", hmac->length);
+        printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
+
+        // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
+        for (int i = 1; i < hmac->length / sizeof(uint64_t); i++)
+        {
+            printf("HMAC value[%d]: %016lx\n", i, hmac->hmac_value);
+        }
+
+        fflush(stdout);
+    }
+}
+
 void add_custom_header6(struct rte_mbuf *pkt)
 {
-    //Definitions
+    // Definitions
     struct ipv6_srh *srh_hdr;
     struct hmac_tlv *hmac_hdr;
     struct rte_ether_hdr *eth_hdr_6 = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
-    void * rest_of_packet = (ipv6_hdr +1);
+    void *rest_of_packet = (ipv6_hdr + 1);
 
-    //save the headers that will be deleted
+    // save the headers that will be deleted
     struct rte_ether_hdr tmp_eth;
     struct rte_ipv6_hdr tmp_ip6;
-    memcpy(&tmp_eth, eth_hdr_6 ,sizeof(*eth_hdr_6));
-    memcpy(&tmp_ip6,ipv6_hdr,sizeof(*ipv6_hdr));
+    memcpy(&tmp_eth, eth_hdr_6, sizeof(*eth_hdr_6));
+    memcpy(&tmp_ip6, ipv6_hdr, sizeof(*ipv6_hdr));
 
     printf("did i successfully copy the eth header 6, %02X:%02X:%02X:%02X:%02X:%02X\n",
            tmp_eth.src_addr.addr_bytes[0], tmp_eth.src_addr.addr_bytes[1],
            tmp_eth.src_addr.addr_bytes[2], tmp_eth.src_addr.addr_bytes[3],
            tmp_eth.src_addr.addr_bytes[4], tmp_eth.src_addr.addr_bytes[5]);
-    
-    //Remove ethernet and ip6 headers
-    rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
-    rte_pktmbuf_adj(pkt,(uint16_t)sizeof(struct rte_ipv6_hdr));
 
-    //Add HMAC and SRH headers respectively
+    // Remove ethernet and ip6 headers
+    rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
+    rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
+
+    // Add HMAC and SRH headers respectively
     hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
     srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
 
-    //Populate the fields
-    hmac_hdr->d_flag = 0;
-    hmac_hdr->hmac_key_id;
-    hmac_hdr->hmac_value;
-    hmac_hdr->length;
-    hmac_hdr->reserved;
+    // Populate the fields
+    hmac_hdr->type = 5;                             // Type field (fixed to 5 for HMAC TLV)
+    hmac_hdr->length = 16;                          // Length of HMAC value in bytes
+    hmac_hdr->d_flag = 0;                           // Destination Address verification enabled
+    hmac_hdr->reserved = 0;                         // Reserved bits set to zero
+    hmac_hdr->hmac_key_id = rte_cpu_to_be_32(1234); // Example HMAC Key ID
 
-    srh_hdr->hdr_ext_len;
-    srh_hdr->next_header;
-    srh_hdr->reserved;
-    srh_hdr->routing_type;
-    srh_hdr->segments;
-    srh_hdr->segments_left;
+    // Populate HMAC value (16 bytes of 0x01)
+    hmac_hdr->hmac_value = 0x0101010101010101;
 
-    //Add the ip6 and ethernet headers respectively
+    // 143 for segment routing
+    srh_hdr->next_header = 59;       // No Next Header in this example
+    srh_hdr->hdr_ext_len = 2;        // Length of SRH in 8-byte units, excluding the first 8 bytes
+    srh_hdr->routing_type = 4;       // Routing type for SRH
+    srh_hdr->segments_left = 1;      // 1 segment left to visit (can be adjusted)
+    memset(srh_hdr->reserved, 0, 4); // Set reserved bytes to zero
 
-    //Set added headers to saved headers
+    struct in6_addr segments[] = {
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}  // Segment 2
+    };
+
+    // Copy the segments to the SRH
+    memcpy(srh_hdr->segments, segments, sizeof(segments));
+
+    // Add the ip6 and ethernet headers respectively
+    struct rte_ipv6_hdr *new_ip6_ptr = (struct rte_ipv6_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ipv6_hdr));
+    struct rte_ether_hdr *new_ether_ptr = (struct rte_ether_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ether_hdr));
+
+    // Set added headers to saved headers
+    memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
+    memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
+
+    printf("Custom header added to ip6 packet in the ingress node");
 }
 
 int main(int argc, char *argv[])
@@ -358,52 +423,21 @@ int main(int argc, char *argv[])
                     }
                     break;
                 case RTE_ETHER_TYPE_IPV6:
-                    printf("\nip6 packet is encountered\n");
-                    // struct rte_ipv6_hdr *ipv6_hdr;
-                    struct ipv6_srh *srh;
-                    struct hmac_tlv *hmac;
-                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
-                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
-                    hmac = (struct hmac_tlv *)(srh + 1);
+                    // 2 options here the packets already containing srh and the packets does not contain
+                    // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
+                    add_custom_header6(mbuf);
 
-                    // Display source and destination MAC addresses
-                    printf("Packet %d:\n", i + 1);
-                    printf("  Src MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-                           eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
-                           eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
-                           eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
-                    printf("  Dst MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-                           eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
-                           eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
-                           eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
-                    printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
-
-                    print_ipv6_address((struct in6_addr *)&ipv6_hdr->src_addr, "source");
-                    print_ipv6_address((struct in6_addr *)&ipv6_hdr->dst_addr, "destination");
-
-                    // Get srh pointer after ipv6 header
-                    if (ipv6_hdr->proto == IPPROTO_ROUTING)
+                    // send the packets back with added cutom header
+                    if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0)
                     {
-                        printf("The size of srh is %lu\n", sizeof(*srh));
-                        printf("The size of hmac is %lu\n", sizeof(*hmac));
-                        printf("The size of hmac is %lu\n", sizeof(eth_hdr));
-                        // print_ipv6_address(srh->segments, "the only segment in the demo packet");
-                        printf("the routing type of srh is %d\n", srh->segments_left);
-                        print_ipv6_address(srh->segments + 1, "asd");
-                        printf("HMAC type: %u\n", hmac->type);
-                        printf("HMAC length: %u\n", hmac->length);
-                        printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
-
-                        // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
-                        for (int i = 1; i < hmac->length / sizeof(uint64_t); i++)
-                        {
-                            printf("HMAC value[%d]: %016lx\n", i, hmac->hmac_value);
-                        }
-
-                        fflush(stdout);
-
-                        add_custom_header6(mbuf);
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
                     }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
+                    rte_pktmbuf_free(mbuf);
                     break;
                 default:
                     printf("\nonly ip4 or ip6 ethernet headers accepted\n");
