@@ -328,7 +328,6 @@ int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 b
     if (!digest)
     {
         rte_log(RTE_LOG_ERR, RTE_LOGTYPE_USER1, "HMAC computation failed\n");
-        rte_free(input);
         return -1;
     }
 
@@ -343,7 +342,6 @@ int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 b
         memset(hmac_out + hmac_len, 0, HMAC_MAX_LENGTH - hmac_len); // Pad with zeros
     }
 
-    rte_free(input);
     return 0; // Success
 }
 
@@ -489,8 +487,18 @@ int main(int argc, char *argv[])
                     // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
                     add_custom_header6(mbuf);
 
+                    struct ipv6_srh *srh;
+                    struct hmac_tlv *hmac;
+                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+                    hmac = (struct hmac_tlv *)(srh + 1);
+
+                    uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
+                    size_t key_len = strlen((char *)key);
+                    uint8_t hmac_out[HMAC_MAX_LENGTH];
+
                     // Compute HMAC
-                    if (calculate_hmac(mbuf, last_entry, flags, hmac_key_id, segment_list, segment_list_len, key, key_len, hmac_out) == 0)
+                    if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
                     {
                         printf("HMAC Computation Successful\n");
                         printf("HMAC: ");

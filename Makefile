@@ -23,8 +23,8 @@ static: build/$(APP)-static
 
 PC_FILE := $(shell $(PKGCONF) --path libdpdk 2>/dev/null)
 CFLAGS += -O3 $(shell $(PKGCONF) --cflags libdpdk)
-LDFLAGS_SHARED = $(shell $(PKGCONF) --libs libdpdk)
-LDFLAGS_STATIC = $(shell $(PKGCONF) --static --libs libdpdk)
+LDFLAGS_SHARED = $(shell $(PKGCONF) --libs libdpdk) -lcrypto
+LDFLAGS_STATIC = $(shell $(PKGCONF) --static --libs libdpdk) -lcrypto
 
 ifeq ($(MAKECMDGOALS),static)
 # check for broken pkg-config
