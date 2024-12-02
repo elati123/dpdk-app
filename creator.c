@@ -1,3 +1,4 @@
+// Melih
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -7,6 +8,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <arpa/inet.h>
+#include <openssl/hmac.h>
 
 #define RX_RING_SIZE 1024
 #define TX_RING_SIZE 1024
@@ -14,6 +16,8 @@
 #define MBUF_CACHE_SIZE 250
 #define BURST_SIZE 32
 #define CUSTOM_HEADER_TYPE 0x0833
+
+#define HMAC_MAX_LENGTH 32 // Truncate HMAC to 32 bytes if needed
 
 struct custom_hdr
 {
@@ -23,11 +27,13 @@ struct custom_hdr
 
 struct ipv6_srh
 {
-    uint8_t next_header;         // Next header type
-    uint8_t hdr_ext_len;         // Length of SRH in 8-byte units
-    uint8_t routing_type;        // Routing type (4 for SRv6)
-    uint8_t segments_left;       // Segments yet to be visited
-    uint8_t reserved[4];         // Reserved for future use
+    uint8_t next_header;  // Next header type
+    uint8_t hdr_ext_len;  // Length of SRH in 8-byte units
+    uint8_t routing_type; // Routing type (4 for SRv6)
+    uint8_t segments_left;
+    uint8_t last_entry;
+    uint8_t flags;               // Segments yet to be visited
+    uint8_t reserved[2];         // Reserved for future use
     struct in6_addr segments[2]; // Array of IPv6 segments max 10 nodes
 };
 
@@ -260,11 +266,13 @@ void add_custom_header6(struct rte_mbuf *pkt)
     hmac_hdr->hmac_value = 0x0101010101010101;
 
     // 61		Any host internal protocol
-    srh_hdr->next_header = 61;       // No Next Header in this example
-    srh_hdr->hdr_ext_len = 2;        // Length of SRH in 8-byte units, excluding the first 8 bytes
-    srh_hdr->routing_type = 4;       // Routing type for SRH
+    srh_hdr->next_header = 61; // No Next Header in this example
+    srh_hdr->hdr_ext_len = 2;  // Length of SRH in 8-byte units, excluding the first 8 bytes
+    srh_hdr->routing_type = 4; // Routing type for SRH
+    srh_hdr->last_entry = 0;
+    srh_hdr->flags = 0;
     srh_hdr->segments_left = 1;      // 1 segment left to visit (can be adjusted)
-    memset(srh_hdr->reserved, 0, 4); // Set reserved bytes to zero
+    memset(srh_hdr->reserved, 0, 2); // Set reserved bytes to zero
 
     struct in6_addr segments[] = {
         {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
@@ -282,8 +290,64 @@ void add_custom_header6(struct rte_mbuf *pkt)
     memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
     memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
 
+    new_ip6_ptr->proto = 43;
 
-    printf("Custom header added to ip6 packet in the ingress node");
+    printf("Custom header added to ip6 packet in the ingress node\n");
+}
+
+int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 bytes)
+                   const struct ipv6_srh *srh,      // Pointer to the IPv6 Segment Routing Header (SRH)
+                   const struct hmac_tlv *hmac_tlv, // Pointer to the HMAC TLV
+                   uint8_t *key,                    // Pre-shared key
+                   size_t key_len,                  // Length of the pre-shared key
+                   uint8_t *hmac_out)               // Output buffer for the HMAC (32 bytes)
+{
+    // Input text buffer for HMAC computation
+    size_t segment_list_len = sizeof(srh->segments);
+
+    size_t input_len = 16 + 1 + 1 + 2 + 4 + segment_list_len; // IPv6 Source + Last Entry + Flags + Length + Key ID + Segment List
+
+    uint8_t input[input_len];
+
+    // Fill the input buffer
+    size_t offset = 0;
+    memcpy(input + offset, src_addr, 16); // IPv6 Source Address
+    offset += 16;
+
+    input[offset++] = srh->last_entry; // Last Entry
+    input[offset++] = srh->flags;      // Flags (D-bit + Reserved)
+
+    input[offset++] = 0; // Placeholder for Length (2 bytes, can be zero for this step)
+    input[offset++] = 0;
+
+    memcpy(input + offset, &hmac_tlv->hmac_key_id, sizeof(hmac_tlv->hmac_key_id)); // HMAC Key ID
+    offset += sizeof(hmac_tlv->hmac_key_id);
+
+    memcpy(input + offset, srh->segments, segment_list_len); // Segment List
+    offset += segment_list_len;
+
+    // Perform HMAC computation using OpenSSL
+    unsigned int hmac_len;
+    uint8_t *digest = HMAC(EVP_sha256(), key, key_len, input, input_len, NULL, &hmac_len);
+
+    if (!digest)
+    {
+        rte_log(RTE_LOG_ERR, RTE_LOGTYPE_USER1, "HMAC computation failed\n");
+        return -1;
+    }
+
+    // Truncate or pad the HMAC to 32 bytes
+    if (hmac_len > HMAC_MAX_LENGTH)
+    {
+        memcpy(hmac_out, digest, HMAC_MAX_LENGTH);
+    }
+    else
+    {
+        memcpy(hmac_out, digest, hmac_len);
+        memset(hmac_out + hmac_len, 0, HMAC_MAX_LENGTH - hmac_len); // Pad with zeros
+    }
+
+    return 0; // Success
 }
 
 int main(int argc, char *argv[])
@@ -428,6 +492,32 @@ int main(int argc, char *argv[])
                     // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
                     add_custom_header6(mbuf);
 
+                    struct ipv6_srh *srh;
+                    struct hmac_tlv *hmac;
+                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+                    hmac = (struct hmac_tlv *)(srh + 1);
+
+                    uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
+                    size_t key_len = strlen((char *)key);
+                    uint8_t hmac_out[HMAC_MAX_LENGTH];
+
+                    // Compute HMAC
+                    if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
+                    {
+                        printf("HMAC Computation Successful\n");
+                        printf("HMAC: ");
+                        for (int i = 0; i < HMAC_MAX_LENGTH; i++)
+                        {
+                            printf("%02x", hmac_out[i]);
+                        }
+                        printf("\n");
+                    }
+                    else
+                    {
+                        printf("HMAC Computation Failed\n");
+                    }
+
                     // send the packets back with added cutom header
                     if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0)
                     {
@@ -441,7 +531,7 @@ int main(int argc, char *argv[])
                     rte_pktmbuf_free(mbuf);
                     break;
                 default:
-                    printf("\nonly ip4 or ip6 ethernet headers accepted\n");
+                    // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
                     break;
                 }
                 // Free the mbuf after processing
