@@ -1,4 +1,4 @@
-// Melih 
+// Melih
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -266,11 +266,13 @@ void add_custom_header6(struct rte_mbuf *pkt)
     hmac_hdr->hmac_value = 0x0101010101010101;
 
     // 61		Any host internal protocol
-    srh_hdr->next_header = 61;       // No Next Header in this example
-    srh_hdr->hdr_ext_len = 2;        // Length of SRH in 8-byte units, excluding the first 8 bytes
-    srh_hdr->routing_type = 4;       // Routing type for SRH
+    srh_hdr->next_header = 61; // No Next Header in this example
+    srh_hdr->hdr_ext_len = 2;  // Length of SRH in 8-byte units, excluding the first 8 bytes
+    srh_hdr->routing_type = 4; // Routing type for SRH
+    srh_hdr->last_entry = 0;
+    srh_hdr->flags = 0;
     srh_hdr->segments_left = 1;      // 1 segment left to visit (can be adjusted)
-    memset(srh_hdr->reserved, 0, 4); // Set reserved bytes to zero
+    memset(srh_hdr->reserved, 0, 2); // Set reserved bytes to zero
 
     struct in6_addr segments[] = {
         {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
@@ -288,7 +290,9 @@ void add_custom_header6(struct rte_mbuf *pkt)
     memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
     memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
 
-    printf("Custom header added to ip6 packet in the ingress node");
+    new_ip6_ptr->proto = 43;
+
+    printf("Custom header added to ip6 packet in the ingress node\n");
 }
 
 int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 bytes)
@@ -527,7 +531,7 @@ int main(int argc, char *argv[])
                     rte_pktmbuf_free(mbuf);
                     break;
                 default:
-                    printf("\nonly ip4 or ip6 ethernet headers accepted\n");
+                    // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
                     break;
                 }
                 // Free the mbuf after processing
