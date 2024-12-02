@@ -16,11 +16,13 @@
 
 struct ipv6_srh
 {
-    uint8_t next_header;         // Next header type
-    uint8_t hdr_ext_len;         // Length of SRH in 8-byte units
-    uint8_t routing_type;        // Routing type (4 for SRv6)
-    uint8_t segments_left;       // Segments yet to be visited
-    uint8_t reserved[4];         // Reserved for future use
+    uint8_t next_header;  // Next header type
+    uint8_t hdr_ext_len;  // Length of SRH in 8-byte units
+    uint8_t routing_type; // Routing type (4 for SRv6)
+    uint8_t segments_left;
+    uint8_t last_entry;
+    uint8_t flags;               // Segments yet to be visited
+    uint8_t reserved[2];         // Reserved for future use
     struct in6_addr segments[2]; // Array of IPv6 segments max 10 nodes
 };
 
@@ -115,12 +117,12 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
     struct ipv6_srh *srh;
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
     srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
-    if (ipv6_hdr->proto == 43 && srh->next_header == 61 )
+    printf("the proto nums are %d and %d\n",ipv6_hdr->proto ,srh->next_header);
+    if (srh->next_header == 61 && ipv6_hdr->proto == 43)
     {
-        printf("segment routing detected");
-        
+        printf("segment routing detected\n");
+
         struct hmac_tlv *hmac;
-        
         hmac = (struct hmac_tlv *)(srh + 1);
 
         // Display source and destination MAC addresses
@@ -150,11 +152,12 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
             printf("HMAC type: %u\n", hmac->type);
             printf("HMAC length: %u\n", hmac->length);
             printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
+            printf("HMAC size: %ld\n",sizeof(hmac->hmac_value));
 
             // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
             for (int i = 1; i < hmac->length / sizeof(uint64_t); i++)
             {
-                printf("HMAC value[%d]: %016lx\n", i, hmac->hmac_value);
+                printf("HMAC value[%d]: %016lx\n\n", i, hmac->hmac_value);
             }
 
             fflush(stdout);
@@ -246,7 +249,6 @@ int main(int argc, char *argv[])
 
             for (int i = 0; i < nb_rx; i++)
             {
-                printf("captured something\n");
                 struct rte_mbuf *mbuf = bufs[i];
                 struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
