@@ -355,6 +355,7 @@ int main(int argc, char *argv[])
 
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
+    uint16_t tx_port_id = 1;
 
     // Initialize the Environment Abstraction Layer (EAL)
     int ret = rte_eal_init(argc, argv);
@@ -382,141 +383,103 @@ int main(int argc, char *argv[])
     {
         display_mac_address(port_id);
     }
+
+    if (port_init(tx_port_id, mbuf_pool) != 0)
+    {
+        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
+    }
+    else
+    {
+        display_mac_address(tx_port_id);
+    }
     printf("Capturing packets on port %d...\n", port_id);
 
-    RTE_ETH_FOREACH_DEV(port_id)
+    // Packet capture loop
+    for (;;)
     {
-        // Packet capture loop
-        for (;;)
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
         {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
-            struct rte_mbuf *bufs[BURST_SIZE];
-            uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
-
-            if (unlikely(nb_rx == 0))
-                continue;
-
-            for (int i = 0; i < nb_rx; i++)
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
             {
-                struct rte_mbuf *mbuf = bufs[i];
-                struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-
-                switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            case RTE_ETHER_TYPE_IPV4:
+                struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+                if (ipv4_hdr->dst_addr == rte_cpu_to_be_32(RTE_IPV4(10, 0, 2, 44)))
                 {
-                case RTE_ETHER_TYPE_IPV4:
-                    struct rte_ipv4_hdr *ipv4_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-                    if (ipv4_hdr->dst_addr == rte_cpu_to_be_32(RTE_IPV4(10, 0, 2, 44)))
-                    {
 
-                        printf("number of the packets received is %d", nb_rx);
-                        // Display source and destination MAC addresses
-                        printf("Packet %d:\n", i + 1);
-                        printf("  Src MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-                               eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
-                               eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
-                               eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
-                        printf("  Dst MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
-                               eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
-                               eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
-                               eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
-                        printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
+                    printf("number of the packets received is %d", nb_rx);
+                    // Display source and destination MAC addresses
+                    printf("Packet %d:\n", i + 1);
+                    printf("  Src MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
+                           eth_hdr->src_addr.addr_bytes[0], eth_hdr->src_addr.addr_bytes[1],
+                           eth_hdr->src_addr.addr_bytes[2], eth_hdr->src_addr.addr_bytes[3],
+                           eth_hdr->src_addr.addr_bytes[4], eth_hdr->src_addr.addr_bytes[5]);
+                    printf("  Dst MAC: %02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 ":%02" PRIx8 "\n",
+                           eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1],
+                           eth_hdr->dst_addr.addr_bytes[2], eth_hdr->dst_addr.addr_bytes[3],
+                           eth_hdr->dst_addr.addr_bytes[4], eth_hdr->dst_addr.addr_bytes[5]);
+                    printf("  EtherType: 0x%04x\n", rte_be_to_cpu_16(eth_hdr->ether_type));
 
-                        printf("  Src IP: %d.%d.%d.%d\n",
-                               (ipv4_hdr->src_addr & 0xff),
-                               (ipv4_hdr->src_addr >> 8) & 0xff,
-                               (ipv4_hdr->src_addr >> 16) & 0xff,
-                               (ipv4_hdr->src_addr >> 24) & 0xff);
-                        printf(
-                            "  Dst IP: %d.%d.%d.%d\n",
-                            (ipv4_hdr->dst_addr & 0xff),
-                            (ipv4_hdr->dst_addr >> 8) & 0xff,
-                            (ipv4_hdr->dst_addr >> 16) & 0xff,
-                            (ipv4_hdr->dst_addr >> 24) & 0xff);
+                    printf("  Src IP: %d.%d.%d.%d\n",
+                           (ipv4_hdr->src_addr & 0xff),
+                           (ipv4_hdr->src_addr >> 8) & 0xff,
+                           (ipv4_hdr->src_addr >> 16) & 0xff,
+                           (ipv4_hdr->src_addr >> 24) & 0xff);
+                    printf(
+                        "  Dst IP: %d.%d.%d.%d\n",
+                        (ipv4_hdr->dst_addr & 0xff),
+                        (ipv4_hdr->dst_addr >> 8) & 0xff,
+                        (ipv4_hdr->dst_addr >> 16) & 0xff,
+                        (ipv4_hdr->dst_addr >> 24) & 0xff);
 
-                        add_custom_header(mbuf);
+                    add_custom_header(mbuf);
 
-                        // change the mac address and the ip address to make basically a repeater. This section of the code is specific to my test setup
+                    // change the mac address and the ip address to make basically a repeater. This section of the code is specific to my test setup
 
-                        struct rte_ether_hdr *new_eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *); // header is changed by above function
+                    struct rte_ether_hdr *new_eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *); // header is changed by above function
 
-                        // struct rte_ether_addr tmp_mac = new_eth_hdr->dst_addr;
+                    // struct rte_ether_addr tmp_mac = new_eth_hdr->dst_addr;
 
-                        // dont change the dst in case of broadcast messages comment out below to swap
-                        // new_eth_hdr->dst_addr = new_eth_hdr->src_addr;
+                    // dont change the dst in case of broadcast messages comment out below to swap
+                    // new_eth_hdr->dst_addr = new_eth_hdr->src_addr;
 
-                        // Destination mac adddress for now is hard coded
-                        static const struct rte_ether_addr dst_mac = {.addr_bytes = {0x08, 0x00, 0x27, 0x21, 0xad, 0x52}};
-                        rte_ether_addr_copy(&dst_mac, &new_eth_hdr->dst_addr);
+                    // Destination mac adddress for now is hard coded
+                    static const struct rte_ether_addr dst_mac = {.addr_bytes = {0x08, 0x00, 0x27, 0x21, 0xad, 0x52}};
+                    rte_ether_addr_copy(&dst_mac, &new_eth_hdr->dst_addr);
 
-                        // Populate source with the MAC address of the port
-                        struct rte_ether_addr *p = &new_eth_hdr->src_addr;
-                        rte_eth_macaddr_get(port_id, p);
+                    // Populate source with the MAC address of the port
+                    struct rte_ether_addr *p = &new_eth_hdr->src_addr;
+                    rte_eth_macaddr_get(port_id, p);
 
-                        // or just send a broadcast back (for trsting purposes)
+                    // or just send a broadcast back (for trsting purposes)
 
-                        // change the ip (swap src dst)
-                        struct custom_hdr *cst_hdr = (struct custom_hdr *)(new_eth_hdr + 1);
-                        ipv4_hdr = (struct rte_ipv4_hdr *)(cst_hdr + 1);
-                        rte_be32_t tmp_ip = ipv4_hdr->dst_addr;
-                        printf("  Tmp IP: %d.%d.%d.%d\n",
-                               (tmp_ip & 0xff),
-                               (tmp_ip >> 8) & 0xff,
-                               (tmp_ip >> 16) & 0xff,
-                               (tmp_ip >> 24) & 0xff);
+                    // change the ip (swap src dst)
+                    struct custom_hdr *cst_hdr = (struct custom_hdr *)(new_eth_hdr + 1);
+                    ipv4_hdr = (struct rte_ipv4_hdr *)(cst_hdr + 1);
+                    rte_be32_t tmp_ip = ipv4_hdr->dst_addr;
+                    printf("  Tmp IP: %d.%d.%d.%d\n",
+                           (tmp_ip & 0xff),
+                           (tmp_ip >> 8) & 0xff,
+                           (tmp_ip >> 16) & 0xff,
+                           (tmp_ip >> 24) & 0xff);
 
-                        ipv4_hdr->dst_addr = ipv4_hdr->src_addr;
-                        ipv4_hdr->src_addr = tmp_ip;
+                    ipv4_hdr->dst_addr = ipv4_hdr->src_addr;
+                    ipv4_hdr->src_addr = tmp_ip;
 
-                        // DEBUG PRINTING DELETE LATER
-                        printf("Custom Header:\n");
-                        printf("  the size of custom header is %ld \n", sizeof(cst_hdr));
-                        printf("  the size of ip header is %ld \n", sizeof(ipv4_hdr));
-                        printf("  String: %s\n", cst_hdr->str);                        // Print up to 5 characters
-                        printf("  Number: 0x%04x\n", rte_be_to_cpu_16(cst_hdr->num2)); // Convert to host byte order
-
-                        // send the packets back with added cutom header
-                        if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0)
-                        {
-                            printf("Error sending packet\n");
-                            rte_pktmbuf_free(mbuf);
-                        }
-                        else
-                        {
-                            printf("Packet sent\n");
-                        }
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    break;
-                case RTE_ETHER_TYPE_IPV6:
-                    // 2 options here the packets already containing srh and the packets does not contain
-                    // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
-                    add_custom_header6(mbuf);
-
-                    struct ipv6_srh *srh;
-                    struct hmac_tlv *hmac;
-                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
-                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
-                    hmac = (struct hmac_tlv *)(srh + 1);
-
-                    uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
-                    size_t key_len = strlen((char *)key);
-                    uint8_t hmac_out[HMAC_MAX_LENGTH];
-
-                    // Compute HMAC
-                    if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
-                    {
-                        printf("HMAC Computation Successful\n");
-                        printf("HMAC: ");
-                        for (int i = 0; i < HMAC_MAX_LENGTH; i++)
-                        {
-                            printf("%02x", hmac_out[i]);
-                        }
-                        printf("\n");
-                    }
-                    else
-                    {
-                        printf("HMAC Computation Failed\n");
-                    }
+                    // DEBUG PRINTING DELETE LATER
+                    printf("Custom Header:\n");
+                    printf("  the size of custom header is %ld \n", sizeof(cst_hdr));
+                    printf("  the size of ip header is %ld \n", sizeof(ipv4_hdr));
+                    printf("  String: %s\n", cst_hdr->str);                        // Print up to 5 characters
+                    printf("  Number: 0x%04x\n", rte_be_to_cpu_16(cst_hdr->num2)); // Convert to host byte order
 
                     // send the packets back with added cutom header
                     if (rte_eth_tx_burst(port_id, 0, &mbuf, 1) == 0)
@@ -526,18 +489,62 @@ int main(int argc, char *argv[])
                     }
                     else
                     {
-                        printf("IPV6 packet sent\n");
+                        printf("Packet sent\n");
                     }
                     rte_pktmbuf_free(mbuf);
-                    break;
-                default:
-                    // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
-                    break;
                 }
-                // Free the mbuf after processing
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                // 2 options here the packets already containing srh and the packets does not contain
+                // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
+                add_custom_header6(mbuf);
+
+                struct ipv6_srh *srh;
+                struct hmac_tlv *hmac;
+                struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+                hmac = (struct hmac_tlv *)(srh + 1);
+
+                uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
+                size_t key_len = strlen((char *)key);
+                uint8_t hmac_out[HMAC_MAX_LENGTH];
+
+                // Compute HMAC
+                if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
+                {
+                    printf("HMAC Computation Successful\n");
+                    printf("HMAC: ");
+                    for (int i = 0; i < HMAC_MAX_LENGTH; i++)
+                    {
+                        printf("%02x", hmac_out[i]);
+                    }
+                    printf("\n");
+                }
+                else
+                {
+                    printf("HMAC Computation Failed\n");
+                }
+
+                // send the packets back with added cutom header
+                if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                {
+                    printf("Error sending packet\n");
+                    rte_pktmbuf_free(mbuf);
+                }
+                else
+                {
+                    printf("IPV6 packet sent\n");
+                }
                 rte_pktmbuf_free(mbuf);
+                break;
+            default:
+                // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
+                break;
             }
+            // Free the mbuf after processing
+            rte_pktmbuf_free(mbuf);
         }
     }
+
     return 0;
 }
