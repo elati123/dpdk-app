@@ -44,7 +44,18 @@ struct hmac_tlv
     uint16_t d_flag : 1;    // 1-bit D flag
     uint16_t reserved : 15; // Remaining 15 bits for reserved
     uint32_t hmac_key_id;   // 4 bytes for the HMAC Key ID
-    uint64_t hmac_value;    // 8 Octets HMAC value must be multiples of 8 octetx and ma is 32 octets
+    uint8_t hmac_value[32]; // 8 Octets HMAC value must be multiples of 8 octetx and ma is 32 octets
+};
+
+struct pot_tlv
+{
+    uint8_t type;             // Type field (1 byte)
+    uint8_t length;           // Length field (1 byte)
+    uint8_t reserved;         // Reserved field (1 byte)
+    uint8_t nonce_length;     // Nonce Length field (1 byte)
+    uint32_t key_set_id;      // Key Set ID (4 bytes)
+    uint8_t nonce[32];        // Nonce (variable length)
+    uint8_t encrypted_hmac[]; // Encrypted HMAC (variable length)
 };
 
 // Initialize a port
@@ -179,6 +190,7 @@ void add_custom_header(struct rte_mbuf *pkt)
     printf("Custom header added to packet.\n");
 }
 
+// irrelevant for the creator this is part of controller to display information i accidentally implemented this here but never deleted it
 void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
 {
     printf("\nip6 packet is encountered\n");
@@ -218,9 +230,9 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
         printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
 
         // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
-        for (int i = 1; i < hmac->length / sizeof(uint64_t); i++)
+        for (int i = 0; i < 32; i++)
         {
-            printf("HMAC value[%d]: %016lx\n", i, hmac->hmac_value);
+            printf("HMAC value[%d]: %02x\n", i, hmac->hmac_value[i]);
         }
 
         fflush(stdout);
@@ -251,7 +263,7 @@ void add_custom_header6(struct rte_mbuf *pkt)
     rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
     rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
 
-    // Add HMAC and SRH headers respectively
+    // Add POT , HMAC and SRH headers respectively
     hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
     srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
 
@@ -263,7 +275,7 @@ void add_custom_header6(struct rte_mbuf *pkt)
     hmac_hdr->hmac_key_id = rte_cpu_to_be_32(1234); // Example HMAC Key ID
 
     // Populate HMAC value (16 bytes of 0x01)
-    hmac_hdr->hmac_value = 0x0101010101010101;
+    memset(hmac_hdr->hmac_value, 0, sizeof(hmac_hdr->hmac_value));
 
     // 61		Any host internal protocol
     srh_hdr->next_header = 61; // No Next Header in this example
@@ -275,8 +287,8 @@ void add_custom_header6(struct rte_mbuf *pkt)
     memset(srh_hdr->reserved, 0, 2); // Set reserved bytes to zero
 
     struct in6_addr segments[] = {
-        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
-        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}  // Segment 2
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}  // Segment 2
     };
 
     // Copy the segments to the SRH
@@ -349,6 +361,14 @@ int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 b
 
     return 0; // Success
 }
+
+// void calculate nonce()
+//{
+// }
+
+// void calculate_pvf(uint64_t k_hmac_ie)
+//{
+// }
 
 int main(int argc, char *argv[])
 {
@@ -501,6 +521,8 @@ int main(int argc, char *argv[])
 
                 struct ipv6_srh *srh;
                 struct hmac_tlv *hmac;
+                // realing the hmac header since we added new headers the address is changed(bu alignment ı beğenmiyorum değiştir)
+                struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
                 struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
                 srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
                 hmac = (struct hmac_tlv *)(srh + 1);
@@ -509,7 +531,7 @@ int main(int argc, char *argv[])
                 size_t key_len = strlen((char *)key);
                 uint8_t hmac_out[HMAC_MAX_LENGTH];
 
-                // Compute HMAC
+                // Compute HMAC bunu burdan al başka biyere koy
                 if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
                 {
                     printf("HMAC Computation Successful\n");
@@ -518,7 +540,10 @@ int main(int argc, char *argv[])
                     {
                         printf("%02x", hmac_out[i]);
                     }
+                    // Write the hmac value in hmac header
                     printf("\n");
+                    memcpy(hmac->hmac_value, hmac_out, 32);
+                    printf("HMAC value inserted to srh_hmac header\n");
                 }
                 else
                 {
