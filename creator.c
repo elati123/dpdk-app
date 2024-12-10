@@ -23,6 +23,7 @@
 #define CUSTOM_HEADER_TYPE 0x0833
 #define SID_NO 2        // Total 3 dpdk runnning nodes. 2 of them are sid1 and sid0(egress)
 #define NONCE_LENGTH 16 // AES uses 16 bytes of iv
+#define EXTRA_SPACE 128
 
 #define HMAC_MAX_LENGTH 32 // Truncate HMAC to 32 bytes if needed
 
@@ -136,6 +137,12 @@ void print_ipv6_address(const struct in6_addr *ipv6_addr, const char *label)
 
 void add_custom_header6(struct rte_mbuf *pkt)
 {
+
+    /*
+        SORUN ICIN 2 YAKLASIM: YA BUTUN EKSTRA  HEADERLARI SONA EKLE
+        YADA TUM PACKETI APEENDLEYE APPENDLEYE YENIDEN INSAA ET AMA BUNUN ICIN BOMBOS BIR MBUF OLUSTURMAK LAZIM
+    
+    */
     // Definitions
     struct ipv6_srh *srh_hdr;
     struct hmac_tlv *hmac_hdr;
@@ -155,36 +162,39 @@ void add_custom_header6(struct rte_mbuf *pkt)
            tmp_eth.src_addr.addr_bytes[2], tmp_eth.src_addr.addr_bytes[3],
            tmp_eth.src_addr.addr_bytes[4], tmp_eth.src_addr.addr_bytes[5]);
 
+    printf("Available headroom: %u\n", rte_pktmbuf_headroom(pkt));
+    printf("Packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+
     // Remove ethernet and ip6 headers
-    rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
-    rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
+    //rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
+    //rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
+    printf("Available headroom after adj operations: %u\n", rte_pktmbuf_headroom(pkt));
 
     // Add POT , HMAC and SRH headers respectively
-
-    //hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
-    //srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
-    pot_hdr = (struct pot_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct pot_tlv));
-    if (pot_hdr == NULL)
-    {
-        printf("asdasdasdasdasdasd");
-        fflush(stdout);
-    };
-
+    // pot_hdr = (struct pot_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct pot_tlv))
+    //printf("Available headroom after pot prepend operations: %u\n", rte_pktmbuf_headroom(pkt));
+    // hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
+    // srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
+    hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_append(pkt, sizeof(struct hmac_tlv));
+    srh_hdr = (struct ipv6_srh *)rte_pktmbuf_append(pkt, sizeof(struct ipv6_srh));
+    pot_hdr = (struct pot_tlv *)rte_pktmbuf_append(pkt, sizeof(struct pot_tlv));
+     printf("Packet length after appends: %u\n", rte_pktmbuf_pkt_len(pkt));
     // Populate the fields
-    /*
-        pot_hdr->type = 1;  // made it up since it is tbd
-        pot_hdr->length = 48; // 32 b PVF + 16 b nonce
-        pot_hdr->reserved = 0;
-        pot_hdr->nonce_length = 16;
-        pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
-        // Initialize the nonce and PVF values (32 bytes of 0x01)
-        memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
-        memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
 
-        printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
-        printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
-        printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
-    */
+    pot_hdr->type = 1;    // made it up since it is tbd
+    pot_hdr->length = 48; // 32 b PVF + 16 b nonce
+    pot_hdr->reserved = 0;
+    pot_hdr->nonce_length = 16;
+    pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
+    // Initialize the nonce and PVF values (32 bytes of 0x01)
+    memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
+
+    memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
+
+    printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
+    printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
+    printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
+
     hmac_hdr->type = 5;                             // Type field (fixed to 5 for HMAC TLV)
     hmac_hdr->length = 16;                          // Length of HMAC value in bytes
     hmac_hdr->d_flag = 0;                           // Destination Address verification enabled
@@ -212,9 +222,11 @@ void add_custom_header6(struct rte_mbuf *pkt)
     memcpy(srh_hdr->segments, segments, sizeof(segments));
 
     // Add the ip6 and ethernet headers respectively
+    printf("Packet length before prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
     struct rte_ipv6_hdr *new_ip6_ptr = (struct rte_ipv6_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ipv6_hdr));
+    printf("Packet length after prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
     struct rte_ether_hdr *new_ether_ptr = (struct rte_ether_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ether_hdr));
-
+    printf("Packet length after prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
     // Set added headers to saved headers
     memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
     memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
@@ -462,7 +474,7 @@ int main(int argc, char *argv[])
 
     // Create a memory pool to hold the mbufs
     mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * rte_eth_dev_count_avail(),
-                                        MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+                                        MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE + EXTRA_SPACE, rte_socket_id());
     if (mbuf_pool == NULL)
         rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
 
