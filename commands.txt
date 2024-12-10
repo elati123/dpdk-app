@@ -196,3 +196,17 @@ void add_custom_header(struct rte_mbuf *pkt)
                     }
                     rte_pktmbuf_free(mbuf);
                 }
+
+
+
+
+pot_hdr->type = 130;  // made it up since it is tbd
+    pot_hdr->length = 48; // 32 b PVF + 16 b nonce
+    pot_hdr->reserved = 0;
+    pot_hdr->nonce_length = 16;
+    pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
+    // Initialize the nonce and PVF values (32 bytes of 0x01)
+    // memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
+    // memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
+
+    printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));

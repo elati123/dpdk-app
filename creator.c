@@ -160,21 +160,31 @@ void add_custom_header6(struct rte_mbuf *pkt)
     rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
 
     // Add POT , HMAC and SRH headers respectively
+
+    //hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
+    //srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
     pot_hdr = (struct pot_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct pot_tlv));
-    hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
-    srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
+    if (pot_hdr == NULL)
+    {
+        printf("asdasdasdasdasdasd");
+        fflush(stdout);
+    };
 
     // Populate the fields
+    /*
+        pot_hdr->type = 1;  // made it up since it is tbd
+        pot_hdr->length = 48; // 32 b PVF + 16 b nonce
+        pot_hdr->reserved = 0;
+        pot_hdr->nonce_length = 16;
+        pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
+        // Initialize the nonce and PVF values (32 bytes of 0x01)
+        memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
+        memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
 
-    pot_hdr->type = 130;  // made it up since it is tbd
-    pot_hdr->length = 48; // 32 b PVF + 16 b nonce
-    pot_hdr->reserved = 0;
-    pot_hdr->nonce_length = 16;
-    pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
-    // Initialize the nonce and PVF values (32 bytes of 0x01)
-    memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
-    memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
-
+        printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
+        printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
+        printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
+    */
     hmac_hdr->type = 5;                             // Type field (fixed to 5 for HMAC TLV)
     hmac_hdr->length = 16;                          // Length of HMAC value in bytes
     hmac_hdr->d_flag = 0;                           // Destination Address verification enabled
