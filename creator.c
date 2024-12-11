@@ -60,6 +60,7 @@ struct pot_tlv
     uint8_t encrypted_hmac[32]; // Encrypted HMAC (variable length)
 };
 
+
 // Initialize a port
 static int port_init(uint16_t port, struct rte_mempool *mbuf_pool)
 {
@@ -149,37 +150,35 @@ void add_custom_header6(struct rte_mbuf *pkt)
     struct pot_tlv *pot_hdr;
     struct rte_ether_hdr *eth_hdr_6 = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
-    void *rest_of_packet = (ipv6_hdr + 1);
+    uint8_t *payload = (uint8_t *)(ipv6_hdr + 1);
 
-    // save the headers that will be deleted
-    struct rte_ether_hdr tmp_eth;
-    struct rte_ipv6_hdr tmp_ip6;
-    memcpy(&tmp_eth, eth_hdr_6, sizeof(*eth_hdr_6));
-    memcpy(&tmp_ip6, ipv6_hdr, sizeof(*ipv6_hdr));
+    printf("Initial available tailroom: %u\n", rte_pktmbuf_tailroom(pkt));
+    printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+    // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
+    size_t payload_size = rte_pktmbuf_pkt_len(pkt) - 54  ;
+    printf("Payload size: %lu\n",payload_size);
+    uint8_t *tmp_payload = (uint8_t *) malloc(payload_size);
+    if (tmp_payload == NULL)
+    {
+        printf("malloc failed\n");
+    }
+    // save the payload which will be deleted and added later
+    memcpy(tmp_payload,payload,payload_size);
 
-    printf("did i successfully copy the eth header 6, %02X:%02X:%02X:%02X:%02X:%02X\n",
-           tmp_eth.src_addr.addr_bytes[0], tmp_eth.src_addr.addr_bytes[1],
-           tmp_eth.src_addr.addr_bytes[2], tmp_eth.src_addr.addr_bytes[3],
-           tmp_eth.src_addr.addr_bytes[4], tmp_eth.src_addr.addr_bytes[5]);
+    // Remove the payload
+    rte_pktmbuf_trim(pkt,payload_size);
+    printf("Available tailroom after trim operations: %u\n", rte_pktmbuf_tailroom(pkt));
 
-    printf("Available headroom: %u\n", rte_pktmbuf_headroom(pkt));
-    printf("Packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
-
-    // Remove ethernet and ip6 headers
-    //rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ether_hdr));
-    //rte_pktmbuf_adj(pkt, (uint16_t)sizeof(struct rte_ipv6_hdr));
-    printf("Available headroom after adj operations: %u\n", rte_pktmbuf_headroom(pkt));
-
-    // Add POT , HMAC and SRH headers respectively
-    // pot_hdr = (struct pot_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct pot_tlv))
-    //printf("Available headroom after pot prepend operations: %u\n", rte_pktmbuf_headroom(pkt));
-    // hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_prepend(pkt, sizeof(struct hmac_tlv));
-    // srh_hdr = (struct ipv6_srh *)rte_pktmbuf_prepend(pkt, sizeof(struct ipv6_srh));
-    hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_append(pkt, sizeof(struct hmac_tlv));
+    // Add the custom headers in order and finally add the payload
     srh_hdr = (struct ipv6_srh *)rte_pktmbuf_append(pkt, sizeof(struct ipv6_srh));
+    hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_append(pkt, sizeof(struct hmac_tlv));
     pot_hdr = (struct pot_tlv *)rte_pktmbuf_append(pkt, sizeof(struct pot_tlv));
-     printf("Packet length after appends: %u\n", rte_pktmbuf_pkt_len(pkt));
+    payload = (uint8_t *)rte_pktmbuf_append(pkt,payload_size);
+    printf("Packet length after appends: %u\n", rte_pktmbuf_pkt_len(pkt));
     // Populate the fields
+    
+    // Reinsert the payload
+    memcpy(payload,tmp_payload,payload_size);
 
     pot_hdr->type = 1;    // made it up since it is tbd
     pot_hdr->length = 48; // 32 b PVF + 16 b nonce
@@ -188,12 +187,8 @@ void add_custom_header6(struct rte_mbuf *pkt)
     pot_hdr->key_set_id = rte_cpu_to_be_32(1234);
     // Initialize the nonce and PVF values (32 bytes of 0x01)
     memset(pot_hdr->nonce, 0, sizeof(pot_hdr->nonce));
-
     memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
 
-    printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
-    printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
-    printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
 
     hmac_hdr->type = 5;                             // Type field (fixed to 5 for HMAC TLV)
     hmac_hdr->length = 16;                          // Length of HMAC value in bytes
@@ -221,17 +216,12 @@ void add_custom_header6(struct rte_mbuf *pkt)
     // Copy the segments to the SRH
     memcpy(srh_hdr->segments, segments, sizeof(segments));
 
-    // Add the ip6 and ethernet headers respectively
-    printf("Packet length before prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
-    struct rte_ipv6_hdr *new_ip6_ptr = (struct rte_ipv6_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ipv6_hdr));
-    printf("Packet length after prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
-    struct rte_ether_hdr *new_ether_ptr = (struct rte_ether_hdr *)rte_pktmbuf_prepend(pkt, sizeof(struct rte_ether_hdr));
-    printf("Packet length after prepend: %u\n", rte_pktmbuf_pkt_len(pkt));
-    // Set added headers to saved headers
-    memcpy(new_ether_ptr, &tmp_eth, sizeof(tmp_eth));
-    memcpy(new_ip6_ptr, &tmp_ip6, sizeof(tmp_ip6));
+    
+    ipv6_hdr->proto = 43;
 
-    new_ip6_ptr->proto = 43;
+    printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
+    printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
+    printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
 
     printf("Custom header added to ip6 packet in the ingress node\n");
 }
@@ -530,6 +520,7 @@ int main(int argc, char *argv[])
                 struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
                 srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
                 hmac = (struct hmac_tlv *)(srh + 1);
+                pot = (struct pot_tlv *)(hmac+1);
 
                 uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
                 size_t key_len = strlen((char *)key);
