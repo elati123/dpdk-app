@@ -235,8 +235,18 @@ int decrypt_pvf(uint8_t *k_pot_in, uint8_t *nonce, uint8_t pvf_out[32])
     BIO_dump_fp(stdout, (const char *)pvf_out, dec_len);
 }
 
-void validate_hmac(uint8_t *k_hmac_ie,uint8_t * pvf_out)
+void compare_hmac(struct hmac_tlv *hmac, uint8_t *hmac_out, struct rte_mbuf *mbuf)
 {
+    if (strncmp(hmac->hmac_value, hmac_out,32) != 0)
+    {
+        printf("The decrypted hmac is not the same as the computed hmac\n");
+        printf("dropping the packet\n");
+        rte_pktmbuf_free(mbuf);
+    }
+    else
+    {
+        printf("The transit of the packet is verified\n");
+    }
 }
 
 void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
@@ -302,14 +312,16 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
             }
             // decrypyt one time with the key of node
             //  first declare the value to store decrypted pvf
-            uint8_t pvf_out[32];
-            memcpy(pvf_out, pot->encrypted_hmac, 32);
-            decrypt_pvf(k_pot_in, pot->nonce, pvf_out);
+            uint8_t hmac_out[32];
+            memcpy(hmac_out, pot->encrypted_hmac, 32);
+            decrypt_pvf(k_pot_in, pot->nonce, hmac_out);
 
             // update the pot header pvf field
-            memcpy(pot->encrypted_hmac, pvf_out, 32);
+            memcpy(pot->encrypted_hmac, hmac_out, 32);
 
+            compare_hmac(hmac, hmac_out, mbuf);
             fflush(stdout);
+            return;
         }
     }
 }
@@ -354,7 +366,6 @@ int main(int argc, char *argv[])
 
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
-    uint16_t tx_port_id = 1;
 
     // Initialize the Environment Abstraction Layer (EAL)
     int ret = rte_eal_init(argc, argv);
@@ -382,20 +393,11 @@ int main(int argc, char *argv[])
     {
         display_mac_address(port_id);
     }
-    if (port_init(tx_port_id, mbuf_pool) != 0)
-    {
-        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
-    }
-    else
-    {
-        display_mac_address(tx_port_id);
-    }
     printf("Capturing packets on port %d...\n", port_id);
 
     // Packet capture loop
     for (;;)
     {
-
         struct rte_mbuf *bufs[BURST_SIZE];
         uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
 
