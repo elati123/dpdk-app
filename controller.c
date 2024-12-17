@@ -20,6 +20,8 @@
 #define BURST_SIZE 32
 #define CUSTOM_HEADER_TYPE 0x0833
 
+#define HMAC_MAX_LENGTH 32 // Truncate HMAC to 32 bytes if needed
+
 struct ipv6_srh
 {
     uint8_t next_header;  // Next header type
@@ -126,6 +128,61 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool)
     return 0;
 }
 
+int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 bytes)
+                   const struct ipv6_srh *srh,      // Pointer to the IPv6 Segment Routing Header (SRH)
+                   const struct hmac_tlv *hmac_tlv, // Pointer to the HMAC TLV
+                   uint8_t *key,                    // Pre-shared key
+                   size_t key_len,                  // Length of the pre-shared key
+                   uint8_t *hmac_out)               // Output buffer for the HMAC (32 bytes)
+{
+    // Input text buffer for HMAC computation
+    size_t segment_list_len = sizeof(srh->segments);
+
+    size_t input_len = 16 + 1 + 1 + 2 + 4 + segment_list_len; // IPv6 Source + Last Entry + Flags + Length + Key ID + Segment List
+
+    uint8_t input[input_len];
+
+    // Fill the input buffer
+    size_t offset = 0;
+    memcpy(input + offset, src_addr, 16); // IPv6 Source Address
+    offset += 16;
+
+    input[offset++] = srh->last_entry; // Last Entry
+    input[offset++] = srh->flags;      // Flags (D-bit + Reserved)
+
+    input[offset++] = 0; // Placeholder for Length (2 bytes, can be zero for this step)
+    input[offset++] = 0;
+
+    memcpy(input + offset, &hmac_tlv->hmac_key_id, sizeof(hmac_tlv->hmac_key_id)); // HMAC Key ID
+    offset += sizeof(hmac_tlv->hmac_key_id);
+
+    memcpy(input + offset, srh->segments, segment_list_len); // Segment List
+    offset += segment_list_len;
+
+    // Perform HMAC computation using OpenSSL
+    unsigned int hmac_len;
+    uint8_t *digest = HMAC(EVP_sha256(), key, key_len, input, input_len, NULL, &hmac_len);
+
+    if (!digest)
+    {
+        rte_log(RTE_LOG_ERR, RTE_LOGTYPE_USER1, "HMAC computation failed\n");
+        return -1;
+    }
+
+    // Truncate or pad the HMAC to 32 bytes
+    if (hmac_len > HMAC_MAX_LENGTH)
+    {
+        memcpy(hmac_out, digest, HMAC_MAX_LENGTH);
+    }
+    else
+    {
+        memcpy(hmac_out, digest, hmac_len);
+        memset(hmac_out + hmac_len, 0, HMAC_MAX_LENGTH - hmac_len); // Pad with zeros
+    }
+
+    return 0; // Success
+}
+
 int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
             unsigned char *iv, unsigned char *plaintext)
 {
@@ -178,6 +235,10 @@ int decrypt_pvf(uint8_t *k_pot_in, uint8_t *nonce, uint8_t pvf_out[32])
     BIO_dump_fp(stdout, (const char *)pvf_out, dec_len);
 }
 
+void validate_hmac(uint8_t *k_hmac_ie,uint8_t * pvf_out)
+{
+}
+
 void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
 {
     printf("\n###########################################################################\n");
@@ -197,9 +258,9 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
         struct pot_tlv *pot;
         hmac = (struct hmac_tlv *)(srh + 1);
         pot = (struct pot_tlv *)(hmac + 1);
-        //The key of this node (middle)
-        uint8_t k_pot_in[32] =  "eerreerreerreerreerreerreerreer";
-
+        // The key of this node (middle)
+        uint8_t k_pot_in[32] = "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw";
+        uint8_t k_hmac_ie[] = "my-hmac-key-for-pvf-calculation";
 
         // Display source and destination MAC addresses
         printf("Packet %d:\n", i + 1);
@@ -239,14 +300,14 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
             {
                 printf("%02x", pot->encrypted_hmac[i]);
             }
-            //decrypyt one time with the key of node
-            // first declare the value to store decrypted pvf
+            // decrypyt one time with the key of node
+            //  first declare the value to store decrypted pvf
             uint8_t pvf_out[32];
-            memcpy(pvf_out,pot->encrypted_hmac,32);
-            decrypt_pvf(k_pot_in,pot->nonce,pvf_out);
+            memcpy(pvf_out, pot->encrypted_hmac, 32);
+            decrypt_pvf(k_pot_in, pot->nonce, pvf_out);
 
-            //update the pot header pvf field
-            memcpy(pot->encrypted_hmac,pvf_out,32);
+            // update the pot header pvf field
+            memcpy(pot->encrypted_hmac, pvf_out, 32);
 
             fflush(stdout);
         }
@@ -331,44 +392,33 @@ int main(int argc, char *argv[])
     }
     printf("Capturing packets on port %d...\n", port_id);
 
-    RTE_ETH_FOREACH_DEV(port_id)
+    // Packet capture loop
+    for (;;)
     {
-        // Packet capture loop
-        for (;;)
+
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
         {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
-            struct rte_mbuf *bufs[BURST_SIZE];
-            uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
-
-            if (unlikely(nb_rx == 0))
-                continue;
-
-            for (int i = 0; i < nb_rx; i++)
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
             {
-                struct rte_mbuf *mbuf = bufs[i];
-                struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-
-                switch (rte_be_to_cpu_16(eth_hdr->ether_type))
-                {
-                case RTE_ETHER_TYPE_IPV4:
-                    process_ip4(mbuf, nb_rx, eth_hdr, i);
-                    break;
-                case RTE_ETHER_TYPE_IPV6:
-                    process_ip6_with_srh(eth_hdr, mbuf, i);
-                    //send the packet to eggress node
-                    if(rte_eth_tx_burst(tx_port_id,0,&mbuf,1)== 0)
-                    {
-                        printf("Error sending packet");
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    else{
-                        printf("IP6 packet successfully sent");
-                    }
-                    printf("\n###########################################################################\n");
-                    break;
-                default:
-                    break;
-                }
+            case RTE_ETHER_TYPE_IPV4:
+                process_ip4(mbuf, nb_rx, eth_hdr, i);
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                process_ip6_with_srh(eth_hdr, mbuf, i);
+                // send the packet to eggress node
+                printf("\n###########################################################################\n");
+                break;
+            default:
+                break;
             }
         }
     }

@@ -210,3 +210,38 @@ pot_hdr->type = 130;  // made it up since it is tbd
     // memset(pot_hdr->encrypted_hmac, 0, sizeof(pot_hdr->encrypted_hmac));
 
     printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
+
+
+int calculate_pvf(uint8_t *k_hmac_ie, uint8_t *hmac, uint8_t *pvf_out)
+{
+    // Calculate PVF
+    unsigned int hmac_len;
+
+    size_t key_len = strlen((char *)k_hmac_ie);
+    uint8_t *digest = (uint8_t *)HMAC(EVP_sha256(), k_hmac_ie, key_len, hmac, HMAC_MAX_LENGTH, NULL, &hmac_len);
+    printf("PVF length is: %d\n", hmac_len);
+    if (!digest)
+    {
+        rte_log(RTE_LOG_ERR, RTE_LOGTYPE_USER1, "PVF computation failed\n");
+        return -1;
+    }
+
+    // Truncate or pad the HMAC to 32 bytes
+    if (hmac_len > HMAC_MAX_LENGTH)
+    {
+        memcpy(pvf_out, digest, HMAC_MAX_LENGTH);
+    }
+    else
+    {
+        memcpy(pvf_out, digest, hmac_len);
+        memset(pvf_out + hmac_len, 0, HMAC_MAX_LENGTH - hmac_len); // Pad with zeros
+    }
+
+    printf("The PVF is: ");
+    for (int i = 0; i < HMAC_MAX_LENGTH; i++)
+    {
+        printf("%02x", pvf_out[i]);
+    }
+    // Write the hmac value in hmac header
+    printf("\n");
+}

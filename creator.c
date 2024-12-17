@@ -282,39 +282,7 @@ int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 b
 }
 
 // Calculates the PVF using the output of calulcate_hmac function with key k_hmac_ie
-int calculate_pvf(uint8_t *k_hmac_ie, uint8_t *hmac, uint8_t *pvf_out)
-{
-    // Calculate PVF
-    unsigned int hmac_len;
 
-    size_t key_len = strlen((char *)k_hmac_ie);
-    uint8_t *digest = (uint8_t *)HMAC(EVP_sha256(), k_hmac_ie, key_len, hmac, HMAC_MAX_LENGTH, NULL, &hmac_len);
-    printf("PVF length is: %d\n", hmac_len);
-    if (!digest)
-    {
-        rte_log(RTE_LOG_ERR, RTE_LOGTYPE_USER1, "PVF computation failed\n");
-        return -1;
-    }
-
-    // Truncate or pad the HMAC to 32 bytes
-    if (hmac_len > HMAC_MAX_LENGTH)
-    {
-        memcpy(pvf_out, digest, HMAC_MAX_LENGTH);
-    }
-    else
-    {
-        memcpy(pvf_out, digest, hmac_len);
-        memset(pvf_out + hmac_len, 0, HMAC_MAX_LENGTH - hmac_len); // Pad with zeros
-    }
-
-    printf("The PVF is: ");
-    for (int i = 0; i < HMAC_MAX_LENGTH; i++)
-    {
-        printf("%02x", pvf_out[i]);
-    }
-    // Write the hmac value in hmac header
-    printf("\n");
-}
 
 int generate_nonce(uint8_t nonce[NONCE_LENGTH])
 {
@@ -395,7 +363,7 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
     return plaintext_len;
 }
 
-void encrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint8_t pvf_out[32])
+void encrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint8_t hmac_out[32])
 {
     // k_pot_in is a 2d array of strings holding statically allocated keys for the nodes. In this proof of concept there is only one middle node and an egress node
     // so the shape is [2][key-length]
@@ -408,15 +376,16 @@ void encrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint
         printf("original text is:\n");
         for (int j = 0; j < HMAC_MAX_LENGTH; j++)
         {
-            printf("%02x", pvf_out[j]);
+            printf("%02x", hmac_out[j]);
         }
         printf("\n");
-        printf("PVF size : %ld\n", strnlen(pvf_out, HMAC_MAX_LENGTH));
-        printf("The cipher length is : %d\n", encrypt(pvf_out, strnlen(pvf_out, HMAC_MAX_LENGTH), k_pot_in[i], nonce, ciphertext));
-        int cipher_len = encrypt(pvf_out, HMAC_MAX_LENGTH, k_pot_in[i], nonce, ciphertext);
+        printf("PVF size : %ld\n", strnlen(hmac_out, HMAC_MAX_LENGTH));
+        int cipher_len = encrypt(hmac_out, HMAC_MAX_LENGTH, k_pot_in[i], nonce, ciphertext);
+        printf("The cipher length is : %d\n",cipher_len);
+        
         printf("Ciphertext is : \n");
         BIO_dump_fp(stdout, (const char *)ciphertext, cipher_len);
-        memcpy(pvf_out, ciphertext, 32);
+        memcpy(hmac_out, ciphertext, 32);
         printf("\n");
     }
 }
@@ -522,12 +491,10 @@ int main(int argc, char *argv[])
                 hmac = (struct hmac_tlv *)(srh + 1);
                 pot = (struct pot_tlv *)(hmac+1);
 
-                uint8_t key[] = "your-pre-shared-key"; // Replace with actual pre-shared key
-                size_t key_len = strlen((char *)key);
                 uint8_t hmac_out[HMAC_MAX_LENGTH];
-                uint8_t pvf_out[HMAC_MAX_LENGTH];
                 uint8_t k_hmac_ie[] = "my-hmac-key-for-pvf-calculation";
                 uint8_t nonce[NONCE_LENGTH];
+                size_t key_len = strlen((char *)k_hmac_ie);
 
                 // FOR PROOF OF CONCEPT THIS IS NOT DYNAMIC
                 // NORMALLY THİS SHOULD BE DYNAMIC ACCORDING TO THE NODES IN THE TOPOLOGY OR SPECIFIALLY ESPECTED PATH OF THE PACKET
@@ -538,8 +505,8 @@ int main(int argc, char *argv[])
                 };
                 // key of the last node is first
 
-                // Compute HMAC bunu burdan al başka biyere koy
-                if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, key, key_len, hmac_out) == 0)
+                // Compute HMAC 
+                if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, k_hmac_ie, key_len, hmac_out) == 0)
                 {
                     printf("HMAC Computation Successful\n");
                     printf("HMAC: ");
@@ -557,28 +524,26 @@ int main(int argc, char *argv[])
                     printf("HMAC Computation Failed\n");
                 }
 
-                calculate_pvf(k_hmac_ie, hmac_out, pvf_out);
-
                 if (generate_nonce(nonce) != 0)
                 {
                     printf("Nonce generation failed retuning\n ");
                     return 1;
                 }
-                encrypt_pvf(k_pot_in, nonce, pvf_out);
+                encrypt_pvf(k_pot_in, nonce, hmac_out);
 
                 printf("Ecrypted PVF before writing to the header: ");
                 for (int i = 0; i < HMAC_MAX_LENGTH; i++)
                 {
-                    printf("%02x", pvf_out[i]);
+                    printf("%02x", hmac_out[i]);
                 }
                 // Write the hmac value in hmac header
                 printf("\n");
-                memcpy(pot->encrypted_hmac, pvf_out, 32);
+                memcpy(pot->encrypted_hmac, hmac_out, 32);
                 memcpy(pot->nonce, nonce, 16);
                 printf("Encrypted PVF and nonce values inserted to pot header\n");
 
                 // Decrypt fpr testing purposes, this is the task for middle and egress nodes
-                decrypt_pvf(k_pot_in, nonce, pvf_out);
+                decrypt_pvf(k_pot_in, nonce, hmac_out);
 
                 // send the packets back with added custom header
                 if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
