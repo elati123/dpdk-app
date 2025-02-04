@@ -96,9 +96,6 @@ static struct
     uint64_t total_pkts;
 } latency_numbers;
 
-#define TICKS_PER_CYCLE_SHIFT 16
-static uint64_t ticks_per_cycle_mult;
-
 static uint16_t
 add_timestamps(uint16_t port __rte_unused, uint16_t qidx __rte_unused,
                struct rte_mbuf **pkts, uint16_t nb_pkts,
@@ -137,6 +134,10 @@ calc_latency(uint16_t port, uint16_t qidx __rte_unused,
            latency_numbers.total_cycles / latency_numbers.total_pkts);
 
     printf("number of packets: %" PRIu64 " Hz\n", latency_numbers.total_pkts);
+
+    double latency_us = (double)latency_numbers.total_cycles / rte_get_tsc_hz() * 1e6; // Convert to microseconds
+
+    printf("Latency: %.3f µs\n", latency_us);
 
     latency_numbers.total_cycles = 0;
     latency_numbers.total_queue_cycles = 0;
@@ -516,6 +517,21 @@ int decrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint8
 
 int main(int argc, char *argv[])
 {
+
+    printf("Enter  (0-1): ");
+    if (scanf("%u", &operation_bypass_bit) == 1)
+    { // Read an unsigned integer
+        if (operation_bypass_bit > 1 || operation_bypass_bit < 0)
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+            rte_exit(EXIT_FAILURE, "Invalid argument\n");
+        }
+        else
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+        }
+    }
+
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
     uint16_t tx_port_id = 1;
@@ -616,10 +632,36 @@ int main(int argc, char *argv[])
                     // FOR PROOF OF CONCEPT THIS IS NOT DYNAMIC
                     // NORMALLY THİS SHOULD BE DYNAMIC ACCORDING TO THE NODES IN THE TOPOLOGY OR SPECIFIALLY ESPECTED PATH OF THE PACKET
                     // can use malloc *
-                    uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH] = {
-                        "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw", // eggress node key
-                        "eerreerreerreerreerreerreerreer"  // middle node key
-                    };
+                    char target_ip[16];
+                    inet_pton(AF_INET6, "2001:db8:1::1", target_ip);
+
+                    if (inet_ntop(AF_INET6, &ipv6_hdr->dst_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
+                    {
+                        perror("inet_ntop failed");
+                        return 1;
+                    }
+
+                    printf("IPv6 Address (string format): %s\n", target_ip);
+
+                    const char *ip1 = "2001:db8:1::6";
+                    const char *ip2 = "2001:db8:1::8";
+                    uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH];
+
+                    if (strncmp(target_ip, ip1, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp)); // ✅ Copy the values
+                    }
+                    else if (strncmp(target_ip, ip2, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "ttyyttyyttyyttyyttyyttyyttyytty",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp)); // ✅ Copy the values
+                    }
+
                     // key of the last node is first
 
                     // Compute HMAC
@@ -660,7 +702,7 @@ int main(int argc, char *argv[])
                     printf("Encrypted PVF and nonce values inserted to pot header\n");
 
                     // Decrypt fpr testing purposes, this is the task for middle and egress nodes
-                    decrypt_pvf(k_pot_in, nonce, hmac_out);
+                    // decrypt_pvf(k_pot_in, nonce, hmac_out);
 
                     // send the packets back with added custom header
                     if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
