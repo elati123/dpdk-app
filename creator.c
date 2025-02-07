@@ -548,9 +548,15 @@ int main(int argc, char *argv[])
         rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
 
     // Check that there is at least one port available
+    uint16_t portcount = 0;
     if (rte_eth_dev_count_avail() == 0)
     {
         rte_exit(EXIT_FAILURE, "No Ethernet ports available\n");
+    }
+    else
+    {
+        portcount = rte_eth_dev_count_total();
+        printf("number of ports: %d \n", (int)portcount);
     }
 
     // Create a memory pool to hold the mbufs
@@ -604,6 +610,7 @@ int main(int argc, char *argv[])
             switch (rte_be_to_cpu_16(eth_hdr->ether_type))
             {
             case RTE_ETHER_TYPE_IPV4:
+                printf("ip4\n");
                 break;
             case RTE_ETHER_TYPE_IPV6:
                 switch (operation_bypass_bit)
@@ -645,21 +652,35 @@ int main(int argc, char *argv[])
 
                     const char *ip1 = "2001:db8:1::6";
                     const char *ip2 = "2001:db8:1::8";
+                    const char *ip3 = "2001:db8:1::10";
                     uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH];
 
-                    if (strncmp(target_ip, ip1, INET6_ADDRSTRLEN) == 0)
+                    if (strncmp(target_ip, ip2, INET6_ADDRSTRLEN) == 0)
                     {
                         uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
                             "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
                             "eerreerreerreerreerreerreerreer"};
-                        memcpy(k_pot_in, temp, sizeof(temp)); // ✅ Copy the values
+                        memcpy(k_pot_in, temp, sizeof(temp));
                     }
-                    else if (strncmp(target_ip, ip2, INET6_ADDRSTRLEN) == 0)
+                    else if (strncmp(target_ip, ip1, INET6_ADDRSTRLEN) == 0)
                     {
                         uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
                             "ttyyttyyttyyttyyttyyttyyttyytty",
                             "eerreerreerreerreerreerreerreer"};
-                        memcpy(k_pot_in, temp, sizeof(temp)); // ✅ Copy the values
+                        memcpy(k_pot_in, temp, sizeof(temp));
+                    }
+                    // IPERF SETUP CODE FORWARD IT TO SERVER BY SWAPPING MAC ADDRESSES SO THE VIRTUAL SWITCH CAN FORWARD IT TO NEXT MACHINE
+                    if (strncmp(target_ip, ip3, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp));
+
+                        
+                        struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
+                        rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+                        rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
                     }
 
                     // key of the last node is first
