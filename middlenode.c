@@ -200,6 +200,24 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
         //The key of this node (middle)
         uint8_t k_pot_in[32] =  "eerreerreerreerreerreerreerreer";
 
+        //FOR IPERF TESTING: IF THE DESTINATION MAC
+        
+        char target_ip[16];
+        if (inet_ntop(AF_INET6,&ipv6_hdr->dst_addr,target_ip,INET6_ADDRSTRLEN)== NULL)
+        {
+            perror("inet_ntop failed");
+            return;
+        
+        }
+        printf("IPv6 address as string : %s\n",target_ip );
+
+        if(strncmp(target_ip,"2001:db8:1::10",INET6_ADDRSTRLEN)== 0)
+        {
+            struct rte_ether_addr mac_addr = {{0x08,0x00,0x27,0xF5,0x60,0xC2}};
+            rte_ether_addr_copy(&eth_hdr->dst_addr,&eth_hdr->src_addr);
+            rte_ether_addr_copy(&mac_addr,&eth_hdr->dst_addr);
+
+        }
 
         // Display source and destination MAC addresses
         printf("Packet %d:\n", i + 1);
