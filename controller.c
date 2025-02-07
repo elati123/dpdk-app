@@ -235,21 +235,24 @@ int decrypt_pvf(uint8_t *k_pot_in, uint8_t *nonce, uint8_t pvf_out[32])
     BIO_dump_fp(stdout, (const char *)pvf_out, dec_len);
 }
 
-void compare_hmac(struct hmac_tlv *hmac, uint8_t *hmac_out, struct rte_mbuf *mbuf)
+int compare_hmac(struct hmac_tlv *hmac, uint8_t *hmac_out, struct rte_mbuf *mbuf)
 {
-    if (strncmp(hmac->hmac_value, hmac_out,32) != 0)
+    if (strncmp(hmac->hmac_value, hmac_out, 32) != 0)
     {
         printf("The decrypted hmac is not the same as the computed hmac\n");
         printf("dropping the packet\n");
         rte_pktmbuf_free(mbuf);
+        return 0;
     }
     else
     {
         printf("The transit of the packet is verified\n");
+        // forward it to the tap interface so iperf can catch it
+        return 1;
     }
 }
 
-void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
+int process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, int i)
 {
     printf("\n###########################################################################\n");
     printf("\nip6 packet is encountered\n");
@@ -319,9 +322,11 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
             // update the pot header pvf field
             memcpy(pot->encrypted_hmac, hmac_out, 32);
 
-            compare_hmac(hmac, hmac_out, mbuf);
+            int retval;
+            retval = compare_hmac(hmac, hmac_out, mbuf);
+
             fflush(stdout);
-            return;
+            return retval;
         }
     }
 }
@@ -366,6 +371,7 @@ int main(int argc, char *argv[])
 
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
+    uint16_t tap_port_id = 1;
 
     // Initialize the Environment Abstraction Layer (EAL)
     int ret = rte_eal_init(argc, argv);
@@ -373,9 +379,15 @@ int main(int argc, char *argv[])
         rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
 
     // Check that there is at least one port available
+    uint16_t portcount = 0;
     if (rte_eth_dev_count_avail() == 0)
     {
         rte_exit(EXIT_FAILURE, "No Ethernet ports available\n");
+    }
+    else
+    {
+        portcount = rte_eth_dev_count_total();
+        printf("number of ports: %d \n", (int)portcount);
     }
 
     // Create a memory pool to hold the mbufs
@@ -392,6 +404,15 @@ int main(int argc, char *argv[])
     else
     {
         display_mac_address(port_id);
+    }
+
+    if (port_init(tap_port_id, mbuf_pool) != 0)
+    {
+        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tap_port_id);
+    }
+    else
+    {
+        display_mac_address(tap_port_id);
     }
     printf("Capturing packets on port %d...\n", port_id);
 
@@ -415,8 +436,22 @@ int main(int argc, char *argv[])
                 process_ip4(mbuf, nb_rx, eth_hdr, i);
                 break;
             case RTE_ETHER_TYPE_IPV6:
-                process_ip6_with_srh(eth_hdr, mbuf, i);
+                int retval;
+                retval = process_ip6_with_srh(eth_hdr, mbuf, i);
                 // send the packet to eggress node
+                 if (retval == 1)
+            {
+                if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
+                {
+                    printf("Error sending packet\n");
+                    rte_pktmbuf_free(mbuf);
+                }
+                else
+                {
+                    printf("IPV6 packet sent\n");
+                }
+                rte_pktmbuf_free(mbuf);
+            }
                 printf("\n###########################################################################\n");
                 break;
             default:
