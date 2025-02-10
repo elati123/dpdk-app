@@ -268,6 +268,7 @@ void add_custom_header6(struct rte_mbuf *pkt)
     }
     // save the payload which will be deleted and added later
     memcpy(tmp_payload, payload, payload_size);
+    
 
     // Remove the payload
     rte_pktmbuf_trim(pkt, payload_size);
@@ -283,6 +284,7 @@ void add_custom_header6(struct rte_mbuf *pkt)
 
     // Reinsert the payload
     memcpy(payload, tmp_payload, payload_size);
+    free(tmp_payload);
 
     pot_hdr->type = 1;    // made it up since it is tbd
     pot_hdr->length = 48; // 32 b PVF + 16 b nonce

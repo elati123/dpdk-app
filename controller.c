@@ -366,6 +366,45 @@ void process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *et
     rte_pktmbuf_free(mbuf);
 }
 
+void remove_headers(struct rte_mbuf *pkt)
+{
+ 
+    struct rte_ether_hdr *eth_hdr_6 = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
+    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
+    struct ipv6_srh  * srh = (struct ipv6_srh *)(ipv6_hdr +1);
+    struct hmac_tlv * hmac = (struct hmac_tlv *)(srh + 1);
+    struct pot_tlv * pot = (struct pot_tlv *) (hmac +1);
+    uint8_t *payload = (uint8_t *)(pot + 1); // this also cantains l4 header
+
+    //reinsert the initial ip6 nexr header for iperf testing the insertion is manual in this case is 6
+    ipv6_hdr->proto = 6;
+    struct rte_ether_addr mac_addr = {{0x5E, 0xC1, 0xE4, 0x87, 0x5D, 0xEF}}; // mac of dtap
+    rte_ether_addr_copy(&mac_addr, &eth_hdr_6->dst_addr);
+
+    printf("packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+    // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes plus the headers between
+    size_t payload_size = rte_pktmbuf_pkt_len(pkt) - (54 + sizeof(struct ipv6_srh) + sizeof(struct hmac_tlv) + sizeof( struct pot_tlv));
+
+    printf("Payload size: %lu\n", payload_size);
+    uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
+    if (tmp_payload == NULL)
+    {
+        printf("malloc failed\n");
+    }
+    // save the payload which will be deleted and added later
+    memcpy(tmp_payload, payload, payload_size);
+
+    //remove headers from the tail
+    rte_pktmbuf_trim(pkt, payload_size);
+    rte_pktmbuf_trim(pkt, sizeof(struct pot_tlv));
+    rte_pktmbuf_trim(pkt, sizeof(struct hmac_tlv));
+    rte_pktmbuf_trim(pkt, sizeof(struct ipv6_srh));
+
+    payload = (uint8_t *)rte_pktmbuf_append(pkt, payload_size);
+    memcpy(payload, tmp_payload, payload_size);
+    free(tmp_payload);
+}
+
 int main(int argc, char *argv[])
 {
 
@@ -439,19 +478,20 @@ int main(int argc, char *argv[])
                 int retval;
                 retval = process_ip6_with_srh(eth_hdr, mbuf, i);
                 // send the packet to eggress node
-                 if (retval == 1)
-            {
-                if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
+                if (retval == 1)
                 {
-                    printf("Error sending packet\n");
+                    remove_headers(mbuf);
+                    if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
                     rte_pktmbuf_free(mbuf);
                 }
-                else
-                {
-                    printf("IPV6 packet sent\n");
-                }
-                rte_pktmbuf_free(mbuf);
-            }
                 printf("\n###########################################################################\n");
                 break;
             default:
