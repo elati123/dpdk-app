@@ -368,22 +368,22 @@ void process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *et
 
 void remove_headers(struct rte_mbuf *pkt)
 {
- 
+
     struct rte_ether_hdr *eth_hdr_6 = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
-    struct ipv6_srh  * srh = (struct ipv6_srh *)(ipv6_hdr +1);
-    struct hmac_tlv * hmac = (struct hmac_tlv *)(srh + 1);
-    struct pot_tlv * pot = (struct pot_tlv *) (hmac +1);
+    struct ipv6_srh *srh = (struct ipv6_srh *)(ipv6_hdr + 1);
+    struct hmac_tlv *hmac = (struct hmac_tlv *)(srh + 1);
+    struct pot_tlv *pot = (struct pot_tlv *)(hmac + 1);
     uint8_t *payload = (uint8_t *)(pot + 1); // this also cantains l4 header
 
-    //reinsert the initial ip6 nexr header for iperf testing the insertion is manual in this case is 6
+    // reinsert the initial ip6 nexr header for iperf testing the insertion is manual in this case is 6
     ipv6_hdr->proto = 6;
     struct rte_ether_addr mac_addr = {{0x5E, 0xC1, 0xE4, 0x87, 0x5D, 0xEF}}; // mac of dtap
     rte_ether_addr_copy(&mac_addr, &eth_hdr_6->dst_addr);
 
     printf("packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
     // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes plus the headers between
-    size_t payload_size = rte_pktmbuf_pkt_len(pkt) - (54 + sizeof(struct ipv6_srh) + sizeof(struct hmac_tlv) + sizeof( struct pot_tlv));
+    size_t payload_size = rte_pktmbuf_pkt_len(pkt) - (54 + sizeof(struct ipv6_srh) + sizeof(struct hmac_tlv) + sizeof(struct pot_tlv));
 
     printf("Payload size: %lu\n", payload_size);
     uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
@@ -394,7 +394,7 @@ void remove_headers(struct rte_mbuf *pkt)
     // save the payload which will be deleted and added later
     memcpy(tmp_payload, payload, payload_size);
 
-    //remove headers from the tail
+    // remove headers from the tail
     rte_pktmbuf_trim(pkt, payload_size);
     rte_pktmbuf_trim(pkt, sizeof(struct pot_tlv));
     rte_pktmbuf_trim(pkt, sizeof(struct hmac_tlv));
@@ -403,6 +403,118 @@ void remove_headers(struct rte_mbuf *pkt)
     payload = (uint8_t *)rte_pktmbuf_append(pkt, payload_size);
     memcpy(payload, tmp_payload, payload_size);
     free(tmp_payload);
+}
+
+void l_loop1(uint16_t port_id, uint16_t tap_port_id)
+{
+    printf("Capturing packets on port %d...\n", port_id);
+
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                process_ip4(mbuf, nb_rx, eth_hdr, i);
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                int retval;
+                retval = process_ip6_with_srh(eth_hdr, mbuf, i);
+                // send the packet to eggress node
+                if (retval == 1)
+                {
+                    remove_headers(mbuf);
+                    if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
+                    rte_pktmbuf_free(mbuf);
+                }
+                printf("\n###########################################################################\n");
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+void l_loop2(uint16_t port_id, uint16_t tap_port_id)
+{
+    unsigned lcore_id;
+    lcore_id = rte_lcore_id();
+    printf("hello from core %u\n", lcore_id);
+    printf("Capturing packets on port %d...\n", port_id);
+
+    // Packet capture loop for returning iperf server answers
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                // send the packet to eggress node
+                if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
+                {
+                    printf("Error sending packet\n");
+                    rte_pktmbuf_free(mbuf);
+                }
+                else
+                {
+                    printf("IPV6 packet sent\n");
+                }
+                rte_pktmbuf_free(mbuf);
+
+                printf("\n###########################################################################\n");
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+int lcore_main_forward(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop1(ports[0], ports[1]);
+    return 0;
+}
+
+// for iperf returning packets
+int lcore_main_forward2(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop2(ports[1], ports[0]);
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -453,52 +565,14 @@ int main(int argc, char *argv[])
     {
         display_mac_address(tap_port_id);
     }
-    printf("Capturing packets on port %d...\n", port_id);
 
-    // Packet capture loop
-    for (;;)
-    {
-        struct rte_mbuf *bufs[BURST_SIZE];
-        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
-
-        if (unlikely(nb_rx == 0))
-            continue;
-
-        for (int i = 0; i < nb_rx; i++)
-        {
-            struct rte_mbuf *mbuf = bufs[i];
-            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-
-            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
-            {
-            case RTE_ETHER_TYPE_IPV4:
-                process_ip4(mbuf, nb_rx, eth_hdr, i);
-                break;
-            case RTE_ETHER_TYPE_IPV6:
-                int retval;
-                retval = process_ip6_with_srh(eth_hdr, mbuf, i);
-                // send the packet to eggress node
-                if (retval == 1)
-                {
-                    remove_headers(mbuf);
-                    if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0)
-                    {
-                        printf("Error sending packet\n");
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    else
-                    {
-                        printf("IPV6 packet sent\n");
-                    }
-                    rte_pktmbuf_free(mbuf);
-                }
-                printf("\n###########################################################################\n");
-                break;
-            default:
-                break;
-            }
-        }
-    }
+    unsigned lcore_id;
+    uint16_t ports[2] = {port_id, tap_port_id};
+    lcore_id = rte_get_next_lcore(-1, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
+    lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+    rte_eal_mp_wait_lcore();
 
     return 0;
 }
