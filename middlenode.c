@@ -197,26 +197,24 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
         struct pot_tlv *pot;
         hmac = (struct hmac_tlv *)(srh + 1);
         pot = (struct pot_tlv *)(hmac + 1);
-        //The key of this node (middle)
-        uint8_t k_pot_in[32] =  "eerreerreerreerreerreerreerreer";
+        // The key of this node (middle)
+        uint8_t k_pot_in[32] = "eerreerreerreerreerreerreerreer";
 
-        //FOR IPERF TESTING: IF THE DESTINATION MAC
-        
+        // FOR IPERF TESTING: IF THE DESTINATION MAC
+
         char target_ip[16];
-        if (inet_ntop(AF_INET6,&ipv6_hdr->dst_addr,target_ip,INET6_ADDRSTRLEN)== NULL)
+        if (inet_ntop(AF_INET6, &ipv6_hdr->dst_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
         {
             perror("inet_ntop failed");
             return;
-        
         }
-        printf("IPv6 address as string : %s\n",target_ip );
+        printf("IPv6 address as string : %s\n", target_ip);
 
-        if(strncmp(target_ip,"2001:db8:1::10",INET6_ADDRSTRLEN)== 0)
+        if (strncmp(target_ip, "2001:db8:1::10", INET6_ADDRSTRLEN) == 0)
         {
-            struct rte_ether_addr mac_addr = {{0x08,0x00,0x27,0xF5,0x60,0xC2}};
-            rte_ether_addr_copy(&eth_hdr->dst_addr,&eth_hdr->src_addr);
-            rte_ether_addr_copy(&mac_addr,&eth_hdr->dst_addr);
-
+            struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xF5, 0x60, 0xC2}};
+            rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+            rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
         }
 
         // Display source and destination MAC addresses
@@ -257,14 +255,14 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
             {
                 printf("%02x", pot->encrypted_hmac[i]);
             }
-            //decrypyt one time with the key of node
-            // first declare the value to store decrypted pvf
+            // decrypyt one time with the key of node
+            //  first declare the value to store decrypted pvf
             uint8_t pvf_out[32];
-            memcpy(pvf_out,pot->encrypted_hmac,32);
-            decrypt_pvf(k_pot_in,pot->nonce,pvf_out);
+            memcpy(pvf_out, pot->encrypted_hmac, 32);
+            decrypt_pvf(k_pot_in, pot->nonce, pvf_out);
 
-            //update the pot header pvf field
-            memcpy(pot->encrypted_hmac,pvf_out,32);
+            // update the pot header pvf field
+            memcpy(pot->encrypted_hmac, pvf_out, 32);
 
             fflush(stdout);
         }
@@ -306,9 +304,126 @@ void process_ip4(struct rte_mbuf *mbuf, uint16_t nb_rx, struct rte_ether_hdr *et
     rte_pktmbuf_free(mbuf);
 }
 
+void l_loop1(uint16_t rx_port_id, uint16_t tx_port_id)
+{
+    printf("Capturing packets on port %d...\n", rx_port_id);
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                process_ip4(mbuf, nb_rx, eth_hdr, i);
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                process_ip6_with_srh(eth_hdr, mbuf, i);
+                // send the packet to eggress node
+                if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                {
+                    printf("Error sending packet");
+                    rte_pktmbuf_free(mbuf);
+                }
+                else
+                {
+                    printf("IP6 packet successfully sent");
+                }
+                printf("\n###########################################################################\n");
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+void l_loop2(uint16_t rx_port_id, uint16_t tx_port_id)
+{
+    printf("Capturing packets on port %d...\n", rx_port_id);
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                process_ip4(mbuf, nb_rx, eth_hdr, i);
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                char target_ip[16];
+                if (inet_ntop(AF_INET6, &ipv6_hdr->src_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
+                {
+                    perror("inet_ntop failed");
+                    return;
+                }
+
+                printf("IPv6 Address (string format): %s\n", target_ip);
+
+                const char *ip = "2001:db8:1::10";
+                if (strncmp(target_ip, ip, INET6_ADDRSTRLEN) == 0)
+                {
+                    printf("Packet is from iperf server \n");
+                    // edit the destination mac and source mac
+                    struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0x91, 0x32, 0x3B}}; // tx port of ingress node packet goes C to B (A <--> B <--> C <--> D)
+                    rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+                    rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
+                    // send the packet to eggress node
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IP6 packet successfully sent");
+                    }
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+int lcore_main_forward(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop1(ports[0], ports[1]);
+    return 0;
+}
+
+// for iperf returning packets
+int lcore_main_forward2(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop2(ports[1], ports[0]);
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
-
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
     uint16_t tx_port_id = 1;
@@ -347,49 +462,14 @@ int main(int argc, char *argv[])
     {
         display_mac_address(tx_port_id);
     }
-    printf("Capturing packets on port %d...\n", port_id);
 
-    RTE_ETH_FOREACH_DEV(port_id)
-    {
-        // Packet capture loop
-        for (;;)
-        {
-
-            struct rte_mbuf *bufs[BURST_SIZE];
-            uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
-
-            if (unlikely(nb_rx == 0))
-                continue;
-
-            for (int i = 0; i < nb_rx; i++)
-            {
-                struct rte_mbuf *mbuf = bufs[i];
-                struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-
-                switch (rte_be_to_cpu_16(eth_hdr->ether_type))
-                {
-                case RTE_ETHER_TYPE_IPV4:
-                    process_ip4(mbuf, nb_rx, eth_hdr, i);
-                    break;
-                case RTE_ETHER_TYPE_IPV6:
-                    process_ip6_with_srh(eth_hdr, mbuf, i);
-                    //send the packet to eggress node
-                    if(rte_eth_tx_burst(tx_port_id,0,&mbuf,1)== 0)
-                    {
-                        printf("Error sending packet");
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    else{
-                        printf("IP6 packet successfully sent");
-                    }
-                    printf("\n###########################################################################\n");
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    }
+     unsigned lcore_id;
+    uint16_t ports[2] = {port_id, tx_port_id};
+    lcore_id = rte_get_next_lcore(-1, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
+    lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+    rte_eal_mp_wait_lcore();
 
     return 0;
 }
