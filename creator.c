@@ -268,7 +268,6 @@ void add_custom_header6(struct rte_mbuf *pkt)
     }
     // save the payload which will be deleted and added later
     memcpy(tmp_payload, payload, payload_size);
-    
 
     // Remove the payload
     rte_pktmbuf_trim(pkt, payload_size);
@@ -517,89 +516,15 @@ int decrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint8
     }
 }
 
-int main(int argc, char *argv[])
+int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id)
 {
-
-    printf("Enter  (0-1): ");
-    if (scanf("%u", &operation_bypass_bit) == 1)
-    { // Read an unsigned integer
-        if (operation_bypass_bit > 1 || operation_bypass_bit < 0)
-        {
-            printf("You entered: %u\n", operation_bypass_bit);
-            rte_exit(EXIT_FAILURE, "Invalid argument\n");
-        }
-        else
-        {
-            printf("You entered: %u\n", operation_bypass_bit);
-        }
-    }
-
-    struct rte_mempool *mbuf_pool;
-    uint16_t port_id = 0;
-    uint16_t tx_port_id = 1;
-
-    static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
-        .name = "example_bbdev_dynfield_tsc",
-        .size = sizeof(tsc_t),
-        .align = alignof(tsc_t),
-    };
-
-    // Initialize the Environment Abstraction Layer (EAL)
-    int ret = rte_eal_init(argc, argv);
-    if (ret < 0)
-        rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
-
-    // Check that there is at least one port available
-    uint16_t portcount = 0;
-    if (rte_eth_dev_count_avail() == 0)
-    {
-        rte_exit(EXIT_FAILURE, "No Ethernet ports available\n");
-    }
-    else
-    {
-        portcount = rte_eth_dev_count_total();
-        printf("number of ports: %d \n", (int)portcount);
-    }
-
-    // Create a memory pool to hold the mbufs
-    mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * rte_eth_dev_count_avail(),
-                                        MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE + EXTRA_SPACE, rte_socket_id());
-    if (mbuf_pool == NULL)
-        rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
-
-    tsc_dynfield_offset =
-        rte_mbuf_dynfield_register(&tsc_dynfield_desc);
-    if (tsc_dynfield_offset < 0)
-        rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
-
-    // Initialize the port
-    if (port_init(port_id, mbuf_pool) != 0)
-    {
-        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", port_id);
-    }
-    else
-    {
-        rte_eth_add_rx_callback(port_id, 0, add_timestamps, NULL);
-        display_mac_address(port_id);
-    }
-
-    if (port_init(tx_port_id, mbuf_pool) != 0)
-    {
-
-        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
-    }
-    else
-    {
-        rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
-        display_mac_address(tx_port_id);
-    }
-    printf("Capturing packets on port %d...\n", port_id);
+    printf("Capturing packets on port %d...\n", rx_port_id);
 
     // Packet capture loop
     for (;;)
     {
         struct rte_mbuf *bufs[BURST_SIZE];
-        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
 
         if (unlikely(nb_rx == 0))
             continue;
@@ -679,7 +604,6 @@ int main(int argc, char *argv[])
                             "eerreerreerreerreerreerreerreer"};
                         memcpy(k_pot_in, temp, sizeof(temp));
 
-                        
                         struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
                         rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
                         rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
@@ -763,6 +687,166 @@ int main(int argc, char *argv[])
             }
         }
     }
+}
+
+void l_loop2(uint16_t rx_port_id, uint16_t tx_port_id)
+{
+    printf("Capturing packets on port %d...\n", rx_port_id);
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                char target_ip[16];
+                if (inet_ntop(AF_INET6, &ipv6_hdr->src_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
+                {
+                    perror("inet_ntop failed");
+                    return;
+                }
+
+                printf("IPv6 Address (string format): %s\n", target_ip);
+
+                const char *ip = "2001:db8:1::10";
+                if (strncmp(target_ip, ip, INET6_ADDRSTRLEN) == 0)
+                {
+                    printf("Packet is from iperf server \n");
+                    // edit the destination mac and source mac
+                    struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xFE, 0xA6, 0x4E}}; // tx port of traffic generator node packet goes B to A (A <--> B <--> C <--> D)
+                    rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+                    rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
+                    // send the packet to eggress node
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IP6 packet successfully sent");
+                    }
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+int lcore_main_forward(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop1(ports[0], ports[1]);
+    return 0;
+}
+
+// for iperf returning packets
+int lcore_main_forward2(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop2(ports[1], ports[0]);
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+
+    printf("Enter  (0-1): ");
+    if (scanf("%u", &operation_bypass_bit) == 1)
+    { // Read an unsigned integer
+        if (operation_bypass_bit > 1 || operation_bypass_bit < 0)
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+            rte_exit(EXIT_FAILURE, "Invalid argument\n");
+        }
+        else
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+        }
+    }
+
+    struct rte_mempool *mbuf_pool;
+    uint16_t port_id = 0;
+    uint16_t tx_port_id = 1;
+
+    static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
+        .name = "example_bbdev_dynfield_tsc",
+        .size = sizeof(tsc_t),
+        .align = alignof(tsc_t),
+    };
+
+    // Initialize the Environment Abstraction Layer (EAL)
+    int ret = rte_eal_init(argc, argv);
+    if (ret < 0)
+        rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
+
+    // Check that there is at least one port available
+    uint16_t portcount = 0;
+    if (rte_eth_dev_count_avail() == 0)
+    {
+        rte_exit(EXIT_FAILURE, "No Ethernet ports available\n");
+    }
+    else
+    {
+        portcount = rte_eth_dev_count_total();
+        printf("number of ports: %d \n", (int)portcount);
+    }
+
+    // Create a memory pool to hold the mbufs
+    mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * rte_eth_dev_count_avail(),
+                                        MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE + EXTRA_SPACE, rte_socket_id());
+    if (mbuf_pool == NULL)
+        rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
+
+    tsc_dynfield_offset =
+        rte_mbuf_dynfield_register(&tsc_dynfield_desc);
+    if (tsc_dynfield_offset < 0)
+        rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+
+    // Initialize the port
+    if (port_init(port_id, mbuf_pool) != 0)
+    {
+        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", port_id);
+    }
+    else
+    {
+        rte_eth_add_rx_callback(port_id, 0, add_timestamps, NULL);
+        display_mac_address(port_id);
+    }
+
+    if (port_init(tx_port_id, mbuf_pool) != 0)
+    {
+
+        rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
+    }
+    else
+    {
+        rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
+        display_mac_address(tx_port_id);
+    }
+
+    unsigned lcore_id;
+    uint16_t ports[2] = {port_id, tx_port_id};
+    lcore_id = rte_get_next_lcore(-1, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
+    lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+    rte_eal_mp_wait_lcore();
 
     return 0;
 }

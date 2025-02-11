@@ -463,7 +463,7 @@ int main(int argc, char *argv[])
         display_mac_address(tx_port_id);
     }
 
-     unsigned lcore_id;
+    unsigned lcore_id;
     uint16_t ports[2] = {port_id, tx_port_id};
     lcore_id = rte_get_next_lcore(-1, 1, 0);
     rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
