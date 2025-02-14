@@ -263,7 +263,7 @@ int process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, i
     pot = (struct pot_tlv *)(srh + 1);
 
     printf("the proto nums are %d and %d\n", ipv6_hdr->proto, srh->next_header);
-    if (srh->next_header == 61 && ipv6_hdr->proto == 43)
+    if (srh->next_header == 61)
     {
         printf("segment routing detected\n");
 
@@ -291,8 +291,6 @@ int process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, i
         print_ipv6_address((struct in6_addr *)&ipv6_hdr->dst_addr, "destination");
 
         // Get srh pointer after ipv6 header
-        if (ipv6_hdr->proto == IPPROTO_ROUTING)
-        {
             printf("The size of srh is %lu\n", sizeof(*srh));
             printf("The size of hmac is %lu\n", sizeof(*hmac));
             printf("The size of pot is %lu\n", sizeof(*pot));
@@ -327,7 +325,6 @@ int process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, i
 
             fflush(stdout);
             return retval;
-        }
     }
 }
 
@@ -377,7 +374,7 @@ void remove_headers(struct rte_mbuf *pkt)
     uint8_t *payload = (uint8_t *)(pot + 1); // this also cantains l4 header
 
     // reinsert the initial ip6 nexr header for iperf testing the insertion is manual in this case is 6
-    ipv6_hdr->proto = 6;
+    //ipv6_hdr->proto = 17;
     struct rte_ether_addr mac_addr = {{0x5E, 0xC1, 0xE4, 0x87, 0x5D, 0xEF}}; // mac of dtap
     rte_ether_addr_copy(&mac_addr, &eth_hdr_6->dst_addr);
 
