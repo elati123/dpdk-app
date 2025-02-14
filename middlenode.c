@@ -20,6 +20,8 @@
 #define BURST_SIZE 32
 #define CUSTOM_HEADER_TYPE 0x0833
 
+static int operation_bypass_bit = 0;
+
 struct ipv6_srh
 {
     uint8_t next_header;  // Next header type
@@ -325,19 +327,38 @@ void l_loop1(uint16_t rx_port_id, uint16_t tx_port_id)
                 process_ip4(mbuf, nb_rx, eth_hdr, i);
                 break;
             case RTE_ETHER_TYPE_IPV6:
-                process_ip6_with_srh(eth_hdr, mbuf, i);
-                // send the packet to eggress node
-                if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                switch (operation_bypass_bit)
                 {
-                    printf("Error sending packet");
+                case 0:
+                    process_ip6_with_srh(eth_hdr, mbuf, i);
+                    // send the packet to eggress node
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IP6 packet successfully sent");
+                    }
+                    printf("\n###########################################################################\n");
+
+                    break;
+                case 1:
+                    printf("All operations are bypassed. \n");
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
                     rte_pktmbuf_free(mbuf);
+                    break;
                 }
-                else
-                {
-                    printf("IP6 packet successfully sent");
-                }
-                printf("\n###########################################################################\n");
-                break;
+
             default:
                 break;
             }
@@ -422,6 +443,21 @@ int lcore_main_forward2(void *arg)
 
 int main(int argc, char *argv[])
 {
+
+    printf("Enter  (0-1): ");
+    if (scanf("%u", &operation_bypass_bit) == 1)
+    { // Read an unsigned integer
+        if (operation_bypass_bit > 1 || operation_bypass_bit < 0)
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+            rte_exit(EXIT_FAILURE, "Invalid argument\n");
+        }
+        else
+        {
+            printf("You entered: %u\n", operation_bypass_bit);
+        }
+    }
+
     struct rte_mempool *mbuf_pool;
     uint16_t port_id = 0;
     uint16_t tx_port_id = 1;
