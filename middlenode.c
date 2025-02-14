@@ -189,7 +189,7 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
     pot = (struct pot_tlv *)(srh + 1);
 
     printf("the proto nums are %d and %d\n", ipv6_hdr->proto, srh->next_header);
-    if (srh->next_header == 61 && ipv6_hdr->proto == 43)
+    if (srh->next_header == 61)
     {
         printf("segment routing detected\n");
 
@@ -233,39 +233,37 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf, 
         print_ipv6_address((struct in6_addr *)&ipv6_hdr->dst_addr, "destination");
 
         // Get srh pointer after ipv6 header
-        if (ipv6_hdr->proto == IPPROTO_ROUTING)
+
+        printf("The size of srh is %lu\n", sizeof(*srh));
+        printf("The size of hmac is %lu\n", sizeof(*hmac));
+        printf("The size of pot is %lu\n", sizeof(*pot));
+
+        printf("HMAC type: %u\n", hmac->type);
+        printf("HMAC length: %u\n", hmac->length);
+        printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
+        printf("HMAC size: %ld\n", sizeof(hmac->hmac_value));
+
+        // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
+        printf("HMAC value: \n");
+        for (int i = 0; i < 32; i++)
         {
-            printf("The size of srh is %lu\n", sizeof(*srh));
-            printf("The size of hmac is %lu\n", sizeof(*hmac));
-            printf("The size of pot is %lu\n", sizeof(*pot));
-
-            printf("HMAC type: %u\n", hmac->type);
-            printf("HMAC length: %u\n", hmac->length);
-            printf("HMAC key ID: %u\n", rte_be_to_cpu_32(hmac->hmac_key_id));
-            printf("HMAC size: %ld\n", sizeof(hmac->hmac_value));
-
-            // TODO burayı dinamik olarak bastır çünkü hmac 8 octet (8 byte 64 bit) veya katı olabilir şimdilik i 1 den başıyor ve i-1 yazdırıyor
-            printf("HMAC value: \n");
-            for (int i = 0; i < 32; i++)
-            {
-                printf("%02x", hmac->hmac_value[i]);
-            }
-            printf("\nPVF value before decrypting: \n");
-            for (int i = 0; i < 32; i++)
-            {
-                printf("%02x", pot->encrypted_hmac[i]);
-            }
-            // decrypyt one time with the key of node
-            //  first declare the value to store decrypted pvf
-            uint8_t pvf_out[32];
-            memcpy(pvf_out, pot->encrypted_hmac, 32);
-            decrypt_pvf(k_pot_in, pot->nonce, pvf_out);
-
-            // update the pot header pvf field
-            memcpy(pot->encrypted_hmac, pvf_out, 32);
-
-            fflush(stdout);
+            printf("%02x", hmac->hmac_value[i]);
         }
+        printf("\nPVF value before decrypting: \n");
+        for (int i = 0; i < 32; i++)
+        {
+            printf("%02x", pot->encrypted_hmac[i]);
+        }
+        // decrypyt one time with the key of node
+        //  first declare the value to store decrypted pvf
+        uint8_t pvf_out[32];
+        memcpy(pvf_out, pot->encrypted_hmac, 32);
+        decrypt_pvf(k_pot_in, pot->nonce, pvf_out);
+
+        // update the pot header pvf field
+        memcpy(pot->encrypted_hmac, pvf_out, 32);
+
+        fflush(stdout);
     }
 }
 
@@ -463,12 +461,13 @@ int main(int argc, char *argv[])
         display_mac_address(tx_port_id);
     }
 
-     unsigned lcore_id;
+    unsigned lcore_id;
     uint16_t ports[2] = {port_id, tx_port_id};
-    lcore_id = rte_get_next_lcore(-1, 1, 0);
-    rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
+    // lcore_id = rte_get_next_lcore(-1, 1, 0);
+    // rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
     lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
     rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+    lcore_main_forward((void *)ports);
     rte_eal_mp_wait_lcore();
 
     return 0;

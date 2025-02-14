@@ -133,7 +133,7 @@ calc_latency(uint16_t port, uint16_t qidx __rte_unused,
     printf("Latency = %" PRIu64 " cycles\n",
            latency_numbers.total_cycles / latency_numbers.total_pkts);
 
-    printf("number of packets: %" PRIu64 " Hz\n", latency_numbers.total_pkts);
+    printf("number of packets: %" PRIu64 "\n", latency_numbers.total_pkts);
 
     double latency_us = (double)latency_numbers.total_cycles / rte_get_tsc_hz() * 1e6; // Convert to microseconds
 
@@ -256,8 +256,8 @@ void add_custom_header6(struct rte_mbuf *pkt)
     struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
     uint8_t *payload = (uint8_t *)(ipv6_hdr + 1);
 
-    printf("Initial available tailroom: %u\n", rte_pktmbuf_tailroom(pkt));
-    printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+    // printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+
     // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
     size_t payload_size = rte_pktmbuf_pkt_len(pkt) - 54;
     printf("Payload size: %lu\n", payload_size);
@@ -268,19 +268,17 @@ void add_custom_header6(struct rte_mbuf *pkt)
     }
     // save the payload which will be deleted and added later
     memcpy(tmp_payload, payload, payload_size);
-    
 
     // Remove the payload
     rte_pktmbuf_trim(pkt, payload_size);
-    printf("Available tailroom after trim operations: %u\n", rte_pktmbuf_tailroom(pkt));
 
     // Add the custom headers in order and finally add the payload
     srh_hdr = (struct ipv6_srh *)rte_pktmbuf_append(pkt, sizeof(struct ipv6_srh));
     hmac_hdr = (struct hmac_tlv *)rte_pktmbuf_append(pkt, sizeof(struct hmac_tlv));
     pot_hdr = (struct pot_tlv *)rte_pktmbuf_append(pkt, sizeof(struct pot_tlv));
     payload = (uint8_t *)rte_pktmbuf_append(pkt, payload_size);
-    printf("Packet length after appends: %u\n", rte_pktmbuf_pkt_len(pkt));
-    // Populate the fields
+    // printf("Packet length after appends: %u\n", rte_pktmbuf_pkt_len(pkt));
+    //  Populate the fields
 
     // Reinsert the payload
     memcpy(payload, tmp_payload, payload_size);
@@ -321,13 +319,60 @@ void add_custom_header6(struct rte_mbuf *pkt)
     // Copy the segments to the SRH
     memcpy(srh_hdr->segments, segments, sizeof(segments));
 
-    ipv6_hdr->proto = 43;
+    // ipv6_hdr->proto = 43;
 
-    printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
-    printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
-    printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
+    // printf("Size of POT header: %lu\n", sizeof(struct pot_tlv));
+    // printf("Size of HMAC header: %lu\n", sizeof(struct hmac_tlv));
+    // printf("Size of SRH header: %lu\n", sizeof(struct ipv6_srh));
 
-    printf("Custom header added to ip6 packet in the ingress node\n");
+    // printf("Custom header added to ip6 packet in the ingress node\n");
+}
+
+void add_custom_header6_only_srh(struct rte_mbuf *pkt)
+{
+    struct ipv6_srh *srh_hdr;
+    struct hmac_tlv *hmac_hdr;
+    struct pot_tlv *pot_hdr;
+    struct rte_ether_hdr *eth_hdr_6 = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
+    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
+    uint8_t *payload = (uint8_t *)(ipv6_hdr + 1);
+
+    printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+
+    // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
+    size_t payload_size = rte_pktmbuf_pkt_len(pkt) - 54;
+    printf("Payload size: %lu\n", payload_size);
+    uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
+    if (tmp_payload == NULL)
+    {
+        printf("malloc failed\n");
+    }
+    // save the payload which will be deleted and added later
+    memcpy(tmp_payload, payload, payload_size);
+
+    // Remove the payload
+    rte_pktmbuf_trim(pkt, payload_size);
+
+    srh_hdr = (struct ipv6_srh *)rte_pktmbuf_append(pkt, sizeof(struct ipv6_srh));
+    memcpy(payload, tmp_payload, payload_size);
+    free(tmp_payload);
+
+    // 61 Any host internal protocol
+    srh_hdr->next_header = 61; // No Next Header in this example
+    srh_hdr->hdr_ext_len = 2;  // Length of SRH in 8-byte units, excluding the first 8 bytes
+    srh_hdr->routing_type = 4; // Routing type for SRH
+    srh_hdr->last_entry = 0;
+    srh_hdr->flags = 0;
+    srh_hdr->segments_left = 1;      // 1 segment left to visit (can be adjusted)
+    memset(srh_hdr->reserved, 0, 2); // Set reserved bytes to zero
+
+    struct in6_addr segments[] = {
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}, // Segment 1
+        {.s6_addr = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}}  // Segment 2
+    };
+
+    // Copy the segments to the SRH
+    memcpy(srh_hdr->segments, segments, sizeof(segments));
 }
 
 int calculate_hmac(uint8_t *src_addr,               // Source IPv6 address (16 bytes)
@@ -394,12 +439,12 @@ int generate_nonce(uint8_t nonce[NONCE_LENGTH])
         printf("Error: Failed to generate random nonce.\n");
         return 1;
     }
-    printf("Generated Nonce: ");
+    // printf("Generated Nonce: ");
     for (int i = 0; i < NONCE_LENGTH; i++)
     {
         printf("%02x", nonce[i]);
     }
-    printf("\n");
+    // printf("\n");
     return 0;
 }
 int encrypt(unsigned char *plaintext, int plaintext_len, unsigned char *key,
@@ -475,21 +520,21 @@ void encrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint
     printf("\n----------Encrypting----------\n");
     for (int i = 0; i < SID_NO; i++)
     {
-        printf("---Iteration: %d---\n", i);
-        printf("original text is:\n");
+        // printf("---Iteration: %d---\n", i);
+        // printf("original text is:\n");
         for (int j = 0; j < HMAC_MAX_LENGTH; j++)
         {
             printf("%02x", hmac_out[j]);
         }
-        printf("\n");
-        printf("PVF size : %ld\n", strnlen(hmac_out, HMAC_MAX_LENGTH));
+        // printf("\n");
+        // printf("PVF size : %ld\n", strnlen(hmac_out, HMAC_MAX_LENGTH));
         int cipher_len = encrypt(hmac_out, HMAC_MAX_LENGTH, k_pot_in[i], nonce, ciphertext);
-        printf("The cipher length is : %d\n", cipher_len);
+        // printf("The cipher length is : %d\n", cipher_len);
 
-        printf("Ciphertext is : \n");
-        BIO_dump_fp(stdout, (const char *)ciphertext, cipher_len);
+        // printf("Ciphertext is : \n");
+        // BIO_dump_fp(stdout, (const char *)ciphertext, cipher_len);
         memcpy(hmac_out, ciphertext, 32);
-        printf("\n");
+        // printf("\n");
     }
 }
 
@@ -515,6 +560,267 @@ int decrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce, uint8
         printf("Decrypted text is : \n");
         BIO_dump_fp(stdout, (const char *)pvf_out, dec_len);
     }
+}
+
+int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id)
+{
+    printf("Capturing packets on port %d...\n", rx_port_id);
+
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                switch (operation_bypass_bit)
+                {
+                case 0:
+                    printf("\n#######################################################\n");
+                    // 2 options here the packets already containing srh and the packets does not contain
+                    // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
+                    add_custom_header6(mbuf);
+
+                    struct ipv6_srh *srh;
+                    struct hmac_tlv *hmac;
+                    struct pot_tlv *pot;
+                    // realigning the hmac header since we added new headers the address is changed(bu alignment ı beğenmiyorum değiştir)
+                    struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
+                    hmac = (struct hmac_tlv *)(srh + 1);
+                    pot = (struct pot_tlv *)(hmac + 1);
+
+                    uint8_t hmac_out[HMAC_MAX_LENGTH];
+                    uint8_t k_hmac_ie[] = "my-hmac-key-for-pvf-calculation";
+                    uint8_t nonce[NONCE_LENGTH];
+                    size_t key_len = strlen((char *)k_hmac_ie);
+
+                    // FOR PROOF OF CONCEPT THIS IS NOT DYNAMIC
+                    // NORMALLY THİS SHOULD BE DYNAMIC ACCORDING TO THE NODES IN THE TOPOLOGY OR SPECIFIALLY ESPECTED PATH OF THE PACKET
+                    // can use malloc *
+                    char target_ip[16];
+                    inet_pton(AF_INET6, "2001:db8:1::1", target_ip);
+
+                    if (inet_ntop(AF_INET6, &ipv6_hdr->dst_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
+                    {
+                        perror("inet_ntop failed");
+                        return 1;
+                    }
+
+                    // printf("IPv6 Address (string format): %s\n", target_ip);
+
+                    const char *ip1 = "2001:db8:1::6";
+                    const char *ip2 = "2001:db8:1::8";
+                    const char *ip3 = "2001:db8:1::10";
+                    uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH];
+
+                    if (strncmp(target_ip, ip2, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp));
+                    }
+                    else if (strncmp(target_ip, ip1, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "ttyyttyyttyyttyyttyyttyyttyytty",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp));
+                    }
+                    // IPERF SETUP CODE FORWARD IT TO SERVER BY SWAPPING MAC ADDRESSES SO THE VIRTUAL SWITCH CAN FORWARD IT TO NEXT MACHINE
+                    if (strncmp(target_ip, ip3, INET6_ADDRSTRLEN) == 0)
+                    {
+                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
+                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
+                            "eerreerreerreerreerreerreerreer"};
+                        memcpy(k_pot_in, temp, sizeof(temp));
+
+                        struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
+                        rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+                        rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
+                    }
+
+                    // key of the last node is first
+
+                    // Compute HMAC
+                    if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, k_hmac_ie, key_len, hmac_out) == 0)
+                    {
+                        printf("HMAC Computation Successful\n");
+                        printf("HMAC: ");
+                        for (int i = 0; i < HMAC_MAX_LENGTH; i++)
+                        {
+                            printf("%02x", hmac_out[i]);
+                        }
+                        // Write the hmac value in hmac header
+                        printf("\n");
+                        memcpy(hmac->hmac_value, hmac_out, 32);
+                        printf("HMAC value inserted to srh_hmac header\n");
+                    }
+                    else
+                    {
+                        printf("HMAC Computation Failed\n");
+                    }
+
+                    if (generate_nonce(nonce) != 0)
+                    {
+                        printf("Nonce generation failed retuning\n ");
+                        return 1;
+                    }
+                    encrypt_pvf(k_pot_in, nonce, hmac_out);
+
+                    printf("Ecrypted PVF before writing to the header: ");
+                    for (int i = 0; i < HMAC_MAX_LENGTH; i++)
+                    {
+                        printf("%02x", hmac_out[i]);
+                    }
+                    // Write the hmac value in hmac header
+                    printf("\n");
+                    memcpy(pot->encrypted_hmac, hmac_out, 32);
+                    memcpy(pot->nonce, nonce, 16);
+                    printf("Encrypted PVF and nonce values inserted to pot header\n");
+
+                    // Decrypt fpr testing purposes, this is the task for middle and egress nodes
+                    // decrypt_pvf(k_pot_in, nonce, hmac_out);
+
+                    // send the packets back with added custom header
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
+                    rte_pktmbuf_free(mbuf);
+                    printf("#######################################################\n");
+                    break;
+                case 1:
+                    printf("All operations are bypassed. \n");
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
+                    rte_pktmbuf_free(mbuf);
+                    break;
+                case 2:
+                    add_custom_header6_only_srh(mbuf);
+                    // send the packets back with added custom header
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet\n");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IPV6 packet sent\n");
+                    }
+                    rte_pktmbuf_free(mbuf);
+
+                    break;
+
+                default:
+                    // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
+                    break;
+                }
+                // Free the mbuf after processing
+                rte_pktmbuf_free(mbuf);
+            }
+        }
+    }
+}
+
+void l_loop2(uint16_t rx_port_id, uint16_t tx_port_id)
+{
+    printf("Capturing packets on port %d...\n", rx_port_id);
+    // Packet capture loop
+    for (;;)
+    {
+        struct rte_mbuf *bufs[BURST_SIZE];
+        uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+
+        if (unlikely(nb_rx == 0))
+            continue;
+
+        for (int i = 0; i < nb_rx; i++)
+        {
+            struct rte_mbuf *mbuf = bufs[i];
+            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+
+            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
+            {
+            case RTE_ETHER_TYPE_IPV4:
+                break;
+            case RTE_ETHER_TYPE_IPV6:
+                struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+                char target_ip[16];
+                if (inet_ntop(AF_INET6, &ipv6_hdr->src_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
+                {
+                    perror("inet_ntop failed");
+                    return;
+                }
+
+                printf("IPv6 Address (string format): %s\n", target_ip);
+
+                const char *ip = "2001:db8:1::10";
+                if (strncmp(target_ip, ip, INET6_ADDRSTRLEN) == 0)
+                {
+                    printf("Packet is from iperf server \n");
+                    // edit the destination mac and source mac
+                    struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0x72, 0x88, 0x1A}}; // tx port of traffic generator node packet goes B to A (A <--> B <--> C <--> D)
+                    rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
+                    rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
+                    // send the packet to eggress node
+                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
+                    {
+                        printf("Error sending packet");
+                        rte_pktmbuf_free(mbuf);
+                    }
+                    else
+                    {
+                        printf("IP6 packet successfully sent");
+                    }
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
+int lcore_main_forward(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop1(ports[0], ports[1]);
+    return 0;
+}
+
+// for iperf returning packets
+int lcore_main_forward2(void *arg)
+{
+    uint16_t *ports = (uint16_t *)arg;
+    l_loop2(ports[1], ports[0]);
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -593,176 +899,15 @@ int main(int argc, char *argv[])
         rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
         display_mac_address(tx_port_id);
     }
-    printf("Capturing packets on port %d...\n", port_id);
 
-    // Packet capture loop
-    for (;;)
-    {
-        struct rte_mbuf *bufs[BURST_SIZE];
-        uint16_t nb_rx = rte_eth_rx_burst(port_id, 0, bufs, BURST_SIZE);
-
-        if (unlikely(nb_rx == 0))
-            continue;
-
-        for (int i = 0; i < nb_rx; i++)
-        {
-            struct rte_mbuf *mbuf = bufs[i];
-            struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-
-            switch (rte_be_to_cpu_16(eth_hdr->ether_type))
-            {
-            case RTE_ETHER_TYPE_IPV4:
-                printf("ip4\n");
-                break;
-            case RTE_ETHER_TYPE_IPV6:
-                switch (operation_bypass_bit)
-                {
-                case 0:
-                    printf("\n#######################################################\n");
-                    // 2 options here the packets already containing srh and the packets does not contain
-                    // TODO CHECK İP6 hdr if next_header field is 43 to determine if the packet is srh
-                    add_custom_header6(mbuf);
-
-                    struct ipv6_srh *srh;
-                    struct hmac_tlv *hmac;
-                    struct pot_tlv *pot;
-                    // realigning the hmac header since we added new headers the address is changed(bu alignment ı beğenmiyorum değiştir)
-                    struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-                    struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
-                    srh = (struct ipv6_srh *)(ipv6_hdr + 1); // SRH follows IPv6 header
-                    hmac = (struct hmac_tlv *)(srh + 1);
-                    pot = (struct pot_tlv *)(hmac + 1);
-
-                    uint8_t hmac_out[HMAC_MAX_LENGTH];
-                    uint8_t k_hmac_ie[] = "my-hmac-key-for-pvf-calculation";
-                    uint8_t nonce[NONCE_LENGTH];
-                    size_t key_len = strlen((char *)k_hmac_ie);
-
-                    // FOR PROOF OF CONCEPT THIS IS NOT DYNAMIC
-                    // NORMALLY THİS SHOULD BE DYNAMIC ACCORDING TO THE NODES IN THE TOPOLOGY OR SPECIFIALLY ESPECTED PATH OF THE PACKET
-                    // can use malloc *
-                    char target_ip[16];
-                    inet_pton(AF_INET6, "2001:db8:1::1", target_ip);
-
-                    if (inet_ntop(AF_INET6, &ipv6_hdr->dst_addr, target_ip, INET6_ADDRSTRLEN) == NULL)
-                    {
-                        perror("inet_ntop failed");
-                        return 1;
-                    }
-
-                    printf("IPv6 Address (string format): %s\n", target_ip);
-
-                    const char *ip1 = "2001:db8:1::6";
-                    const char *ip2 = "2001:db8:1::8";
-                    const char *ip3 = "2001:db8:1::10";
-                    uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH];
-
-                    if (strncmp(target_ip, ip2, INET6_ADDRSTRLEN) == 0)
-                    {
-                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
-                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
-                            "eerreerreerreerreerreerreerreer"};
-                        memcpy(k_pot_in, temp, sizeof(temp));
-                    }
-                    else if (strncmp(target_ip, ip1, INET6_ADDRSTRLEN) == 0)
-                    {
-                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
-                            "ttyyttyyttyyttyyttyyttyyttyytty",
-                            "eerreerreerreerreerreerreerreer"};
-                        memcpy(k_pot_in, temp, sizeof(temp));
-                    }
-                    // IPERF SETUP CODE FORWARD IT TO SERVER BY SWAPPING MAC ADDRESSES SO THE VIRTUAL SWITCH CAN FORWARD IT TO NEXT MACHINE
-                    if (strncmp(target_ip, ip3, INET6_ADDRSTRLEN) == 0)
-                    {
-                        uint8_t temp[SID_NO][HMAC_MAX_LENGTH] = {
-                            "qqwwqqwwqqwwqqwwqqwwqqwwqqwwqqw",
-                            "eerreerreerreerreerreerreerreer"};
-                        memcpy(k_pot_in, temp, sizeof(temp));
-
-                        
-                        struct rte_ether_addr mac_addr = {{0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
-                        rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
-                        rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
-                    }
-
-                    // key of the last node is first
-
-                    // Compute HMAC
-                    if (calculate_hmac(ipv6_hdr->src_addr, srh, hmac, k_hmac_ie, key_len, hmac_out) == 0)
-                    {
-                        printf("HMAC Computation Successful\n");
-                        printf("HMAC: ");
-                        for (int i = 0; i < HMAC_MAX_LENGTH; i++)
-                        {
-                            printf("%02x", hmac_out[i]);
-                        }
-                        // Write the hmac value in hmac header
-                        printf("\n");
-                        memcpy(hmac->hmac_value, hmac_out, 32);
-                        printf("HMAC value inserted to srh_hmac header\n");
-                    }
-                    else
-                    {
-                        printf("HMAC Computation Failed\n");
-                    }
-
-                    if (generate_nonce(nonce) != 0)
-                    {
-                        printf("Nonce generation failed retuning\n ");
-                        return 1;
-                    }
-                    encrypt_pvf(k_pot_in, nonce, hmac_out);
-
-                    printf("Ecrypted PVF before writing to the header: ");
-                    for (int i = 0; i < HMAC_MAX_LENGTH; i++)
-                    {
-                        printf("%02x", hmac_out[i]);
-                    }
-                    // Write the hmac value in hmac header
-                    printf("\n");
-                    memcpy(pot->encrypted_hmac, hmac_out, 32);
-                    memcpy(pot->nonce, nonce, 16);
-                    printf("Encrypted PVF and nonce values inserted to pot header\n");
-
-                    // Decrypt fpr testing purposes, this is the task for middle and egress nodes
-                    // decrypt_pvf(k_pot_in, nonce, hmac_out);
-
-                    // send the packets back with added custom header
-                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
-                    {
-                        printf("Error sending packet\n");
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    else
-                    {
-                        printf("IPV6 packet sent\n");
-                    }
-                    rte_pktmbuf_free(mbuf);
-                    printf("#######################################################\n");
-                    break;
-                case 1:
-                    printf("All operations are bypassed. \n");
-                    if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0)
-                    {
-                        printf("Error sending packet\n");
-                        rte_pktmbuf_free(mbuf);
-                    }
-                    else
-                    {
-                        printf("IPV6 packet sent\n");
-                    }
-                    rte_pktmbuf_free(mbuf);
-                    break;
-
-                default:
-                    // printf("\nonly ip4 or ip6 ethernet headers accepted\n");
-                    break;
-                }
-                // Free the mbuf after processing
-                rte_pktmbuf_free(mbuf);
-            }
-        }
-    }
+    unsigned lcore_id;
+    uint16_t ports[2] = {port_id, tx_port_id};
+    // lcore_id = rte_get_next_lcore(-1, 1, 0);
+    // rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
+    lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
+    rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+    lcore_main_forward((void *)ports);
+    rte_eal_mp_wait_lcore();
 
     return 0;
 }
