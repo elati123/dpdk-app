@@ -826,10 +826,10 @@ int lcore_main_forward2(void *arg)
 int main(int argc, char *argv[])
 {
 
-    printf("Enter  (0-1): ");
+    printf("Enter  (0-1-2): ");
     if (scanf("%u", &operation_bypass_bit) == 1)
     { // Read an unsigned integer
-        if (operation_bypass_bit > 1 || operation_bypass_bit < 0)
+        if (operation_bypass_bit > 2 || operation_bypass_bit < 0)
         {
             printf("You entered: %u\n", operation_bypass_bit);
             rte_exit(EXIT_FAILURE, "Invalid argument\n");
