@@ -224,16 +224,14 @@ void send_packet_to(struct rte_ether_addr mac_addr, struct rte_mbuf *mbuf,
   struct rte_ether_hdr *eth_hdr =
       rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
-  
-
   // Compare the current destination MAC address to the broadcast address
   if (rte_is_broadcast_ether_addr(&eth_hdr->dst_addr) != 1) {
     // If it's not a broadcast address, update the destination MAC address
-        printf("the passed address is");
-     printf("%02X:%02X:%02X:%02X:%02X:%02X\n",
-         mac_addr.addr_bytes[0], mac_addr.addr_bytes[1], mac_addr.addr_bytes[2],
-         mac_addr.addr_bytes[3], mac_addr.addr_bytes[4],
-         mac_addr.addr_bytes[5]);
+    printf("the passed address is");
+    printf("%02X:%02X:%02X:%02X:%02X:%02X\n", mac_addr.addr_bytes[0],
+           mac_addr.addr_bytes[1], mac_addr.addr_bytes[2],
+           mac_addr.addr_bytes[3], mac_addr.addr_bytes[4],
+           mac_addr.addr_bytes[5]);
     printf("not broadcast mac\n");
     rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
     rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
@@ -245,10 +243,10 @@ void send_packet_to(struct rte_ether_addr mac_addr, struct rte_mbuf *mbuf,
     rte_pktmbuf_free(mbuf);
   } else {
     printf("IPV6 packet sent to:");
-     printf("%02X:%02X:%02X:%02X:%02X:%02X\n",
-         eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1], eth_hdr->dst_addr.addr_bytes[2],
-         eth_hdr->dst_addr.addr_bytes[3], eth_hdr->dst_addr.addr_bytes[4],
-         eth_hdr->dst_addr.addr_bytes[5]);
+    printf("%02X:%02X:%02X:%02X:%02X:%02X\n", eth_hdr->dst_addr.addr_bytes[0],
+           eth_hdr->dst_addr.addr_bytes[1], eth_hdr->dst_addr.addr_bytes[2],
+           eth_hdr->dst_addr.addr_bytes[3], eth_hdr->dst_addr.addr_bytes[4],
+           eth_hdr->dst_addr.addr_bytes[5]);
   }
   rte_pktmbuf_free(mbuf);
 }
@@ -576,13 +574,13 @@ int decrypt_pvf(uint8_t k_pot_in[SID_NO][HMAC_MAX_LENGTH], uint8_t *nonce,
 
 int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
   printf("Capturing packets on port %d...\n", rx_port_id);
+  struct rte_ether_addr middle_node_mac_addr = {
+      {0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
 
   // Packet capture loop
   for (;;) {
     struct rte_mbuf *bufs[BURST_SIZE];
     uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
-    struct rte_ether_addr middle_node_mac_addr = {
-              {0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
 
     if (unlikely(nb_rx == 0))
       continue;
@@ -700,9 +698,9 @@ int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
           // egress nodes decrypt_pvf(k_pot_in, nonce, hmac_out);
 
           // send the packets back with added custom header
-          
-          send_packet_to(middle_node_mac_addr, mbuf, tx_port_id); printf(
-              "#######################################################\n");
+
+          send_packet_to(middle_node_mac_addr, mbuf, tx_port_id);
+          printf("#######################################################\n");
           break;
         case 1:
           printf("All operations are bypassed. \n");
@@ -728,6 +726,8 @@ int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
 
 void l_loop2(uint16_t rx_port_id, uint16_t tx_port_id) {
   printf("Capturing packets on port %d...\n", rx_port_id);
+  struct rte_ether_addr traffic_mac_addr = {
+      {0x08, 0x00, 0x27, 0x0F, 0xAC, 0x33}}; // rx port of middle node
   // Packet capture loop
   for (;;) {
     struct rte_mbuf *bufs[BURST_SIZE];
@@ -759,19 +759,9 @@ void l_loop2(uint16_t rx_port_id, uint16_t tx_port_id) {
         if (strncmp(target_ip, ip, INET6_ADDRSTRLEN) == 0) {
           printf("Packet is from iperf server \n");
           // edit the destination mac and source mac
-          struct rte_ether_addr mac_addr = {
-              {0x08, 0x00, 0x27, 0x72, 0x88,
-               0x1A}}; // tx port of traffic generator node packet goes B to A
-                       // (A <--> B <--> C <--> D)
-          rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
-          rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
-          // send the packet to eggress node
-          if (rte_eth_tx_burst(tx_port_id, 0, &mbuf, 1) == 0) {
-            printf("Error sending packet");
-            rte_pktmbuf_free(mbuf);
-          } else {
-            printf("IP6 packet successfully sent from egress");
-          }
+          // tx port of traffic generator node packet goes B to A
+          // (A <--> B <--> C <--> D)
+          send_packet_to(traffic_mac_addr, mbuf, tx_port_id);
         }
         break;
       default:

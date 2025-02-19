@@ -415,8 +415,8 @@ void remove_headers_only_srh(struct rte_mbuf *pkt) {
   printf("packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
   // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
   // plus the headers between
-  size_t payload_size = rte_pktmbuf_pkt_len(pkt) -
-                        (54 + sizeof(struct ipv6_srh));
+  size_t payload_size =
+      rte_pktmbuf_pkt_len(pkt) - (54 + sizeof(struct ipv6_srh));
 
   printf("Payload size: %lu\n", payload_size);
   uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
@@ -494,6 +494,8 @@ void l_loop2(uint16_t port_id, uint16_t tap_port_id) {
   lcore_id = rte_lcore_id();
   printf("hello from core %u\n", lcore_id);
   printf("Capturing packets on port %d...\n", port_id);
+  struct rte_ether_addr middle_mac_addr = {
+      {0x08, 0x00, 0x27, 0x8E, 0x4F, 0xBC}};
 
   // Packet capture loop for returning iperf server answers
   for (;;) {
@@ -512,17 +514,24 @@ void l_loop2(uint16_t port_id, uint16_t tap_port_id) {
       case RTE_ETHER_TYPE_IPV4:
         break;
       case RTE_ETHER_TYPE_IPV6:
-        // send the packet to eggress node
-        if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0) {
-          printf("Error sending packet\n");
-          rte_pktmbuf_free(mbuf);
-        } else {
-          printf("IPV6 packet sent\n");
+        struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr + 1);
+        char target_ip[16];
+        if (inet_ntop(AF_INET6, &ipv6_hdr->src_addr, target_ip,
+                      INET6_ADDRSTRLEN) == NULL) {
+          perror("inet_ntop failed");
+          return;
         }
-        rte_pktmbuf_free(mbuf);
 
-        printf("\n#############################################################"
-               "##############\n");
+        printf("IPv6 Address (string format): %s\n", target_ip);
+
+        const char *ip = "2001:db8:1::10";
+        if (strncmp(target_ip, ip, INET6_ADDRSTRLEN) == 0) {
+          printf("Packet is from iperf server \n");
+          // edit the destination mac and source mac
+          // tx port of traffic generator node packet goes D to C
+          // (A <--> B <--> C <--> D)
+          send_packet_to(middle_mac_addr, mbuf, tap_port_id);
+        }
         break;
       default:
         break;
