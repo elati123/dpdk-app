@@ -224,9 +224,17 @@ void send_packet_to(struct rte_ether_addr mac_addr, struct rte_mbuf *mbuf,
   struct rte_ether_hdr *eth_hdr =
       rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
+  
+
   // Compare the current destination MAC address to the broadcast address
   if (rte_is_broadcast_ether_addr(&eth_hdr->dst_addr) != 1) {
     // If it's not a broadcast address, update the destination MAC address
+        printf("the passed address is");
+     printf("%02X:%02X:%02X:%02X:%02X:%02X\n",
+         mac_addr.addr_bytes[0], mac_addr.addr_bytes[1], mac_addr.addr_bytes[2],
+         mac_addr.addr_bytes[3], mac_addr.addr_bytes[4],
+         mac_addr.addr_bytes[5]);
+    printf("not broadcast mac\n");
     rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
     rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
   }
@@ -236,7 +244,11 @@ void send_packet_to(struct rte_ether_addr mac_addr, struct rte_mbuf *mbuf,
     printf("Error sending packet\n");
     rte_pktmbuf_free(mbuf);
   } else {
-    printf("IPV6 packet sent\n");
+    printf("IPV6 packet sent to:");
+     printf("%02X:%02X:%02X:%02X:%02X:%02X\n",
+         eth_hdr->dst_addr.addr_bytes[0], eth_hdr->dst_addr.addr_bytes[1], eth_hdr->dst_addr.addr_bytes[2],
+         eth_hdr->dst_addr.addr_bytes[3], eth_hdr->dst_addr.addr_bytes[4],
+         eth_hdr->dst_addr.addr_bytes[5]);
   }
   rte_pktmbuf_free(mbuf);
 }
@@ -358,6 +370,8 @@ void add_custom_header6_only_srh(struct rte_mbuf *pkt) {
   rte_pktmbuf_trim(pkt, payload_size);
 
   srh_hdr = (struct ipv6_srh *)rte_pktmbuf_append(pkt, sizeof(struct ipv6_srh));
+  payload = (uint8_t *)rte_pktmbuf_append(pkt, payload_size);
+
   memcpy(payload, tmp_payload, payload_size);
   free(tmp_payload);
 
@@ -567,6 +581,8 @@ int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
   for (;;) {
     struct rte_mbuf *bufs[BURST_SIZE];
     uint16_t nb_rx = rte_eth_rx_burst(rx_port_id, 0, bufs, BURST_SIZE);
+    struct rte_ether_addr middle_node_mac_addr = {
+              {0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
 
     if (unlikely(nb_rx == 0))
       continue;
@@ -684,8 +700,7 @@ int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
           // egress nodes decrypt_pvf(k_pot_in, nonce, hmac_out);
 
           // send the packets back with added custom header
-          struct rte_ether_addr middle_node_mac_addr = {
-              {0x08, 0x00, 0x27, 0xC6, 0x79, 0x2A}}; // rx port of middle node
+          
           send_packet_to(middle_node_mac_addr, mbuf, tx_port_id); printf(
               "#######################################################\n");
           break;
