@@ -416,8 +416,7 @@ void remove_headers_only_srh(struct rte_mbuf *pkt) {
   // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
   // plus the headers between
   size_t payload_size = rte_pktmbuf_pkt_len(pkt) -
-                        (54 + sizeof(struct ipv6_srh) +
-                         sizeof(struct hmac_tlv) + sizeof(struct pot_tlv));
+                        (54 + sizeof(struct ipv6_srh));
 
   printf("Payload size: %lu\n", payload_size);
   uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
@@ -455,7 +454,6 @@ void l_loop1(uint16_t port_id, uint16_t tap_port_id) {
 
       switch (rte_be_to_cpu_16(eth_hdr->ether_type)) {
       case RTE_ETHER_TYPE_IPV4:
-        process_ip4(mbuf, nb_rx, eth_hdr, i);
         break;
       case RTE_ETHER_TYPE_IPV6:
 
