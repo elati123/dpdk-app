@@ -428,6 +428,7 @@ void remove_headers_only_srh(struct rte_mbuf *pkt) {
 
   // remove headers from the tail
   rte_pktmbuf_trim(pkt, payload_size);
+  rte_pktmbuf_trim(pkt, sizeof(struct ipv6_srh));
 
   payload = (uint8_t *)rte_pktmbuf_append(pkt, payload_size);
   memcpy(payload, tmp_payload, payload_size);
