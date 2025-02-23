@@ -350,7 +350,7 @@ void process_ip6_with_srh(struct rte_ether_hdr *eth_hdr, struct rte_mbuf *mbuf,
     // update the pot header pvf field
     memcpy(pot->encrypted_hmac, pvf_out, 32);
 
-    fflush(stdout);
+    //fflush(stdout);
   }
 }
 
@@ -541,9 +541,9 @@ int main(int argc, char *argv[]) {
   }
 
   if (port_init(tx_port_id, mbuf_pool) != 0) {
-    rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
     rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
   } else {
+    rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
     display_mac_address(tx_port_id);
   }
 
@@ -553,10 +553,10 @@ int main(int argc, char *argv[]) {
   uint16_t ports[2] = {port_id, tx_port_id};
   // lcore_id = rte_get_next_lcore(-1, 1, 0);
   // rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
-  lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
-  rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+  //lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
+  //rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
   lcore_main_forward((void *)ports);
-  rte_eal_mp_wait_lcore();
+  //rte_eal_mp_wait_lcore();
 
   return 0;
 }
