@@ -465,19 +465,40 @@ void l_loop1(uint16_t port_id, uint16_t tap_port_id) {
           // send the packet to eggress node
           if (retval == 1) {
             remove_headers(mbuf);
-            send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+            //send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+              if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0) {
+    printf("Error sending packet\n");
+    rte_pktmbuf_free(mbuf);
+  } else {
+    printf("IPV6 packet sent\n");
+  }
+  rte_pktmbuf_free(mbuf);
           }
           printf("\n###########################################################"
                  "################\n");
           break;
         case 1:
           printf("All operations are bypassed. \n");
-          send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+          //send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+          if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0) {
+    printf("Error sending packet\n");
+    rte_pktmbuf_free(mbuf);
+  } else {
+    printf("IPV6 packet sent\n");
+  }
+  rte_pktmbuf_free(mbuf);
           break;
 
         case 2:
           remove_headers_only_srh(mbuf);
-          send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+          //send_packet_to(tap_mac_addr, mbuf, tap_port_id);
+          if (rte_eth_tx_burst(tap_port_id, 0, &mbuf, 1) == 0) {
+    printf("Error sending packet\n");
+    rte_pktmbuf_free(mbuf);
+  } else {
+    printf("IPV6 packet sent\n");
+  }
+  rte_pktmbuf_free(mbuf);
 
         default:
           break;
