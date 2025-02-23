@@ -112,8 +112,6 @@ static uint16_t calc_latency(uint16_t port, uint16_t qidx __rte_unused,
   uint64_t ticks;
   unsigned i;
 
-  printf("TSC frequency: %" PRIu64 " Hz\n", rte_get_tsc_hz());
-
   for (i = 0; i < nb_pkts; i++) {
     cycles += now - *tsc_field(pkts[i]);
   }
@@ -227,12 +225,6 @@ void send_packet_to(struct rte_ether_addr mac_addr, struct rte_mbuf *mbuf,
   // Compare the current destination MAC address to the broadcast address
   if (rte_is_broadcast_ether_addr(&eth_hdr->dst_addr) != 1) {
     // If it's not a broadcast address, update the destination MAC address
-    printf("the passed address is");
-    printf("%02X:%02X:%02X:%02X:%02X:%02X\n", mac_addr.addr_bytes[0],
-           mac_addr.addr_bytes[1], mac_addr.addr_bytes[2],
-           mac_addr.addr_bytes[3], mac_addr.addr_bytes[4],
-           mac_addr.addr_bytes[5]);
-    printf("not broadcast mac\n");
     rte_ether_addr_copy(&eth_hdr->dst_addr, &eth_hdr->src_addr);
     rte_ether_addr_copy(&mac_addr, &eth_hdr->dst_addr);
   }
@@ -272,7 +264,7 @@ void add_custom_header6(struct rte_mbuf *pkt) {
 
   // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
   size_t payload_size = rte_pktmbuf_pkt_len(pkt) - 54;
-  printf("Payload size: %lu\n", payload_size);
+  // printf("Payload size: %lu\n", payload_size);
   uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
   if (tmp_payload == NULL) {
     printf("malloc failed\n");
@@ -352,11 +344,11 @@ void add_custom_header6_only_srh(struct rte_mbuf *pkt) {
   struct rte_ipv6_hdr *ipv6_hdr = (struct rte_ipv6_hdr *)(eth_hdr_6 + 1);
   uint8_t *payload = (uint8_t *)(ipv6_hdr + 1);
 
-  printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
+  // printf("Initial packet length: %u\n", rte_pktmbuf_pkt_len(pkt));
 
   // Assuming ip6 packets the size of ethernet header + ip6 header is 54 bytes
   size_t payload_size = rte_pktmbuf_pkt_len(pkt) - 54;
-  printf("Payload size: %lu\n", payload_size);
+  // printf("Payload size: %lu\n", payload_size);
   uint8_t *tmp_payload = (uint8_t *)malloc(payload_size);
   if (tmp_payload == NULL) {
     printf("malloc failed\n");
@@ -700,17 +692,21 @@ int l_loop1(uint16_t rx_port_id, uint16_t tx_port_id) {
           // send the packets back with added custom header
 
           send_packet_to(middle_node_mac_addr, mbuf, tx_port_id);
-          printf("#######################################################\n");
+          printf("\n#######################################################\n");
           break;
         case 1:
+          printf("\n#######################################################\n");
           printf("All operations are bypassed. \n");
           send_packet_to(middle_node_mac_addr, mbuf, tx_port_id);
+          printf("\n#######################################################\n");
           break;
         case 2:
+          printf("\n#######################################################\n");
           add_custom_header6_only_srh(mbuf);
           // for iperf testing swap the mac address (normally the scapy
           // generated packets have broadcast dest mac)
           send_packet_to(middle_node_mac_addr, mbuf, tx_port_id);
+          printf("\n#######################################################\n");
           break;
 
         default:
@@ -847,14 +843,17 @@ int main(int argc, char *argv[]) {
     display_mac_address(tx_port_id);
   }
 
+  // MAKE ALL INITIAL PRINTS HERE
+  printf("TSC frequency: %" PRIu64 " Hz\n", rte_get_tsc_hz());
+
   unsigned lcore_id;
   uint16_t ports[2] = {port_id, tx_port_id};
   // lcore_id = rte_get_next_lcore(-1, 1, 0);
   // rte_eal_remote_launch(lcore_main_forward, (void *)ports, lcore_id);
   lcore_id = rte_get_next_lcore(lcore_id, 1, 0);
-  rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
+  // rte_eal_remote_launch(lcore_main_forward2, (void *)ports, lcore_id);
   lcore_main_forward((void *)ports);
-  rte_eal_mp_wait_lcore();
+  // rte_eal_mp_wait_lcore();
 
   return 0;
 }
