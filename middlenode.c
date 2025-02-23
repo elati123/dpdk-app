@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <inttypes.h>
 #include <openssl/conf.h>
 #include <openssl/err.h>
@@ -9,10 +10,17 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <rte_mbuf_core.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include <getopt.h>
+#include <rte_cycles.h>
+#include <rte_lcore.h>
+#include <rte_mbuf_dyn.h>
+#include <stdalign.h>
+#include <stdlib.h>
 #define RX_RING_SIZE 1024
 #define TX_RING_SIZE 1024
 #define NUM_MBUFS 8191
@@ -50,6 +58,76 @@ struct pot_tlv {
   uint8_t nonce[16];          // Nonce (variable length)
   uint8_t encrypted_hmac[32]; // Encrypted HMAC (variable length)
 };
+
+/////////////////////////////////////////////////////////////
+// Functions for packet timestamping
+static int hwts_dynfield_offset = -1;
+
+static inline rte_mbuf_timestamp_t *hwts_field(struct rte_mbuf *mbuf) {
+  return RTE_MBUF_DYNFIELD(mbuf, hwts_dynfield_offset, rte_mbuf_timestamp_t *);
+}
+
+typedef uint64_t tsc_t;
+static int tsc_dynfield_offset = -1;
+
+static inline tsc_t *tsc_field(struct rte_mbuf *mbuf) {
+  return RTE_MBUF_DYNFIELD(mbuf, tsc_dynfield_offset, tsc_t *);
+}
+
+static struct {
+  uint64_t total_cycles;
+  uint64_t total_queue_cycles;
+  uint64_t total_pkts;
+} latency_numbers;
+
+static uint16_t add_timestamps(uint16_t port __rte_unused,
+                               uint16_t qidx __rte_unused,
+                               struct rte_mbuf **pkts, uint16_t nb_pkts,
+                               uint16_t max_pkts __rte_unused,
+                               void *_ __rte_unused) {
+  unsigned i;
+  uint64_t now = rte_rdtsc();
+
+  for (i = 0; i < nb_pkts; i++)
+    *tsc_field(pkts[i]) = now;
+  return nb_pkts;
+}
+
+static uint16_t calc_latency(uint16_t port, uint16_t qidx __rte_unused,
+                             struct rte_mbuf **pkts, uint16_t nb_pkts,
+                             void *_ __rte_unused) {
+  uint64_t cycles = 0;
+  uint64_t queue_ticks = 0;
+  uint64_t now = rte_rdtsc();
+  uint64_t ticks;
+  unsigned i;
+
+  for (i = 0; i < nb_pkts; i++) {
+    cycles += now - *tsc_field(pkts[i]);
+  }
+
+  latency_numbers.total_cycles += cycles;
+
+  latency_numbers.total_pkts += nb_pkts;
+
+  printf("Latency = %" PRIu64 " cycles\n",
+         latency_numbers.total_cycles / latency_numbers.total_pkts);
+
+  printf("number of packets: %" PRIu64 "\n", latency_numbers.total_pkts);
+
+  double latency_us = (double)latency_numbers.total_cycles / rte_get_tsc_hz() *
+                      1e6; // Convert to microseconds
+
+  printf("Latency: %.3f µs\n", latency_us);
+
+  latency_numbers.total_cycles = 0;
+  latency_numbers.total_queue_cycles = 0;
+  latency_numbers.total_pkts = 0;
+
+  return nb_pkts;
+}
+
+//////////////////////////////////////////////////////////////
 
 void display_mac_address(uint16_t port_id) {
   struct rte_ether_addr mac_addr;
@@ -102,6 +180,17 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool) {
   const uint16_t rx_rings = 1, tx_rings = 1;
   int retval;
   uint16_t q;
+  struct rte_eth_dev_info dev_info;
+
+  retval = rte_eth_dev_info_get(port, &dev_info);
+  if (retval != 0) {
+    printf("Error during getting device (port %u) info: %s\n", port,
+           strerror(-retval));
+
+    return retval;
+  }
+  if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE)
+    port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
 
   // Configure the Ethernet device
   retval = rte_eth_dev_configure(port, rx_rings, tx_rings, &port_conf);
@@ -416,6 +505,12 @@ int main(int argc, char *argv[]) {
   uint16_t port_id = 0;
   uint16_t tx_port_id = 1;
 
+  static const struct rte_mbuf_dynfield tsc_dynfield_desc = {
+      .name = "example_bbdev_dynfield_tsc",
+      .size = sizeof(tsc_t),
+      .align = alignof(tsc_t),
+  };
+
   // Initialize the Environment Abstraction Layer (EAL)
   int ret = rte_eal_init(argc, argv);
   if (ret < 0)
@@ -433,18 +528,27 @@ int main(int argc, char *argv[]) {
   if (mbuf_pool == NULL)
     rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
 
+  tsc_dynfield_offset = rte_mbuf_dynfield_register(&tsc_dynfield_desc);
+  if (tsc_dynfield_offset < 0)
+    rte_exit(EXIT_FAILURE, "Cannot register mbuf field\n");
+
   // Initialize the port
   if (port_init(port_id, mbuf_pool) != 0) {
     rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", port_id);
   } else {
+    rte_eth_add_rx_callback(port_id, 0, add_timestamps, NULL);
     display_mac_address(port_id);
   }
+
   if (port_init(tx_port_id, mbuf_pool) != 0) {
+    rte_eth_add_tx_callback(tx_port_id, 0, calc_latency, NULL);
     rte_exit(EXIT_FAILURE, "Cannot init port %" PRIu16 "\n", tx_port_id);
   } else {
     display_mac_address(tx_port_id);
   }
 
+  // MAKE ALL INITIAL PRINTS HERE
+  printf("TSC frequency: %" PRIu64 " Hz\n", rte_get_tsc_hz());
   unsigned lcore_id;
   uint16_t ports[2] = {port_id, tx_port_id};
   // lcore_id = rte_get_next_lcore(-1, 1, 0);
