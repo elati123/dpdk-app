@@ -31,14 +31,14 @@ save_latencies_to_csv(scenario3_latencies, "scenario3_latencies.csv")
 
 # Step 3: Combine latencies into a single DataFrame for box plot
 data = pd.DataFrame({
-    "Scenario": ["PoT"] * len(scenario1_latencies) + ["Forwarding"] * len(scenario2_latencies) + ["Adding SRH"] * len(scenario3_latencies),
+    "Scenario": ["PoT"] * len(scenario1_latencies) + ["Simple Forwarding"] * len(scenario2_latencies) + ["Only SRH Addition"] * len(scenario3_latencies),
     "Latency (µs)": scenario1_latencies + scenario2_latencies + scenario3_latencies
 })
 
 # Step 4: Create box plot
 plt.figure(figsize=(10, 6))
 sns.boxplot(x="Scenario", y="Latency (µs)", data=data, palette="Set2")
-plt.title("Latency Distribution Across Scenarios")
+plt.title("Latency Distribution Across Scenarios (Ingress Node)")
 plt.xlabel("Scenario")
 plt.ylabel("Latency (µs)")
 plt.yscale("log")
